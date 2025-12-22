@@ -11,10 +11,10 @@ services:
     depends_on:
       - orchestrator_service
 
-  frontend_service:
+  frontend_react:
     build: ./frontend_react
     ports:
-      - "5173:5173"
+      - "4173:4173"
     environment:
       - VITE_API_BASE_URL=https://bff.pointcoach.shop # Logic needed here or baking in build
     depends_on:
