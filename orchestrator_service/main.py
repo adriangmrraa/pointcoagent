@@ -524,7 +524,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     # Invoke Agent
     try:
         inputs = {"input": event.text, "chat_history": memory.chat_memory.messages}
-        result = await executor.invoke(inputs)
+        result = await executor.ainvoke(inputs)
         output = result["output"] 
         
         final_messages = []
