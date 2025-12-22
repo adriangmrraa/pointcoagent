@@ -326,6 +326,24 @@ def set_cached_tool(key: str, data: dict, ttl: int = 300):
     except Exception as e:
         logger.error("cache_write_error", error=str(e))
 
+def simplify_product(p):
+    """Keep only essential fields for the LLM to save tokens."""
+    if not isinstance(p, dict): return p
+    
+    # Simplify variants to just a summary of options if needed, or specific prices
+    # For now, just taking the main price and promotional price
+    price = p.get("variants", [{}])[0].get("price", "0")
+    promo_price = p.get("variants", [{}])[0].get("promotional_price", None)
+    
+    return {
+        "id": p.get("id"),
+        "name": p.get("name", {}).get("es", "Sin nombre"),
+        "price": price,
+        "promotional_price": promo_price,
+        "url": p.get("canonical_url"),
+        # "description": p.get("description", {}).get("es", "")[:200] + "..." # Truncate description
+    }
+
 def call_tiendanube_api(endpoint: str, params: dict = None):
     headers = {
         "Authentication": f"bearer {TIENDANUBE_TOKEN}",
@@ -337,38 +355,45 @@ def call_tiendanube_api(endpoint: str, params: dict = None):
         response = requests.get(url, params=params, headers=headers, timeout=10)
         if response.status_code != 200:
             return f"Error HTTP {response.status_code}: {response.text}"
-        return response.json()
+        
+        data = response.json()
+        
+        # Auto-simplify if it's a list of products
+        if isinstance(data, list) and "/products" in endpoint:
+            return [simplify_product(p) for p in data]
+            
+        return data
     except Exception as e:
         return f"Request Error: {str(e)}"
 
 @tool
 def productsq(q: str):
-    """Search for products by keyword in Tienda Nube."""
+    """Search for products by keyword in Tienda Nube. Returns top 5 results simplified."""
     cache_key = f"productsq:{q}"
     cached = get_cached_tool(cache_key)
     if cached: return cached
-    result = call_tiendanube_api("/products", {"q": q, "per_page": 20})
+    result = call_tiendanube_api("/products", {"q": q, "per_page": 5})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
     return result
 
 @tool
 def productsq_category(category: str, keyword: str):
-    """Search for products by category and keyword in Tienda Nube."""
+    """Search for products by category and keyword in Tienda Nube. Returns top 5 results simplified."""
     q = f"{category} {keyword}"
     cache_key = f"productsq_category:{category}:{keyword}"
     cached = get_cached_tool(cache_key)
     if cached: return cached
-    result = call_tiendanube_api("/products", {"q": q, "per_page": 20})
+    result = call_tiendanube_api("/products", {"q": q, "per_page": 5})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
     return result
 
 @tool
 def productsall():
-    """Get a general list of products from Tienda Nube."""
+    """Get a general list of products from Tienda Nube (Top 5)."""
     cache_key = "productsall"
     cached = get_cached_tool(cache_key)
     if cached: return cached
-    result = call_tiendanube_api("/products", {"per_page": 25})
+    result = call_tiendanube_api("/products", {"per_page": 5})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
     return result
 
@@ -451,7 +476,7 @@ LINK WEB: https://www.pointecoach.shop/
         raise ValueError("OPENAI_API_KEY missing")
 
     llm = ChatOpenAI(
-        model="gpt-4-turbo-preview",  # Upgraded for better instruction following
+        model="gpt-4o-mini",  # Upgraded for rate limits and speed
         api_key=OPENAI_API_KEY, 
         temperature=0, 
         max_tokens=1500
