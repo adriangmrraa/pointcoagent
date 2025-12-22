@@ -518,31 +518,3 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     except Exception as e:
         logger.error("agent_execution_failed", error=str(e))
         return OrchestratorResult(status="error", send=False, text="Error processing request")
-            
-            output_text = " | ".join([m.text for m in result_messages])
-                
-        except Exception as e:
-            log.error("agent_error", error=str(e))
-            await db.mark_inbound_failed(event.provider, event.provider_message_id, str(e))
-            return OrchestratorResult(status="error", send=False, meta={"error": str(e)})
-
-        # 4. Save & Result
-        latency = time.time() - start_time
-        # Save both user and assistant messages
-        await db.append_chat_message(event.from_number, "user", event.text, correlation_id)
-        await db.append_chat_message(event.from_number, "assistant", output_text, correlation_id)
-        await db.mark_inbound_done(event.provider, event.provider_message_id)
-        
-        log.info("request_completed", status="ok", latency=latency)
-        return OrchestratorResult(
-            status="ok",
-            send=True,
-            text=output_text,
-            messages=result_messages
-        )
-    except Exception as e:
-        log.error("unexpected_error", error=str(e))
-        await db.mark_inbound_failed(event.provider, event.provider_message_id, str(e))
-        return OrchestratorResult(status="error", send=False, meta={"error": str(e)})
-    finally:
-        if acquired: lock.release()
