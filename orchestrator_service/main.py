@@ -479,7 +479,7 @@ LINK WEB: https://www.pointecoach.shop/
         model="gpt-5-mini",  # Upgraded for rate limits and speed
         api_key=OPENAI_API_KEY, 
         temperature=0, 
-        max_tokens=1500
+        max_completion_tokens=1500
     )
     
     agent_def = create_openai_functions_agent(llm, tools, prompt)
