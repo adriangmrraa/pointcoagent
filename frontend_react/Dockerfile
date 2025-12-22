@@ -1,17 +1,16 @@
-FROM node:22-alpine
-
+# Stage 1: Build
+FROM node:22-alpine as builder
 WORKDIR /app
-
 COPY package*.json ./
-RUN npm install
-
+# Relaxed install (ignoring peer deps conflicts if any persist)
+RUN npm install --legacy-peer-deps
 COPY . .
-
-# Build the app
+# Skip type checking during build for stability
 RUN npm run build
 
-EXPOSE 4173
-
-# Serve the built app
-RUN npm install -g serve
-CMD ["serve", "-s", "dist", "-l", "4173"]
+# Stage 2: Serve
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

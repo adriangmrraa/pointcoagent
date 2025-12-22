@@ -14,7 +14,7 @@ services:
   frontend_react:
     build: ./frontend_react
     ports:
-      - "4173:4173"
+      - "4173:80"
     environment:
       - VITE_API_BASE_URL=https://bff.pointcoach.shop # Logic needed here or baking in build
     depends_on:
