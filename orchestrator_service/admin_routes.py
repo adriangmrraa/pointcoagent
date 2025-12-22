@@ -74,14 +74,15 @@ async def get_stats():
 @router.get("/logs", dependencies=[Depends(verify_admin_token)])
 async def get_logs(limit: int = 50):
     """Fetch recent chat logs for the 'Live History' view."""
-    # Using chat_messages as the source of truth for display
-    # Join with inbound status if needed, but for now simple chat log is enough
+    # Fetch recent messages
     rows = await db.pool.fetch("""
         SELECT 
+            cm.id,
             cm.from_number,
             cm.role,
             cm.content,
             cm.created_at,
+            cm.correlation_id,
             im.status as inbound_status
         FROM chat_messages cm
         LEFT JOIN inbound_messages im ON cm.correlation_id = im.correlation_id AND cm.role = 'user'
@@ -89,27 +90,33 @@ async def get_logs(limit: int = 50):
         LIMIT $1
     """, limit)
     
-    # Adapt to frontend format (it expects 'payload' JSON usually, but we'll try to match app.js logic)
-    # app.js expects: received_at, from_number, to_number, status, payload (json or string), ai_response
-    
     logs = []
-    # This is a bit tricky because the frontend expects a combined view (User + AI) in one row 
-    # OR separate rows. app.js logic:
-    # entry.innerHTML = `[${time}] User: ... | Status: ... <br> User: ... AI: ...`
-    
-    # Let's group by correlation_id to simulate sessions if possible, or just return flat list
-    # For compatibility with the specific app.js provided which parses 'payload':
-    
     for row in rows:
+        # Try to parse content if it's JSON (AI responses are often JSON strings)
+        content_display = row['content']
+        try:
+            if row['role'] == 'assistant':
+                # AI content usually comes as '{"messages": [{"text": "..."}]}'
+                # We want to extract just the text for the preview
+                parsed = json.loads(row['content'])
+                if isinstance(parsed, dict) and "messages" in parsed:
+                     # Join all text parts
+                     content_display = " ".join([m.get("text", "") for m in parsed["messages"]])
+        except:
+            pass # Keep original if parse fails
+
         logs.append({
+            "id": row['id'],
             "received_at": row['created_at'].isoformat(),
             "from_number": row['from_number'],
             "to_number": "Bot",
+            "role": row['role'], # 'user' or 'assistant'
             "status": row['inbound_status'] or "sent",
-            "payload": json.dumps({"text": row['content']}), # Wrap in JSON as app.js tries to parse it
-            "ai_response": None # We send individual messages, so AI response is its own row usually. 
-                                # But app.js logic looks for ai_response property.
-                                # To make it look nice, we might need a better query grouping user+assistant.
+            "correlation_id": row['correlation_id'],
+            # The frontend expects 'current_step' or 'payload' to show text. 
+            # We'll use payload to send the parsed text cleanly.
+            "payload": json.dumps({"text": content_display, "raw": row['content']}), 
+            "ai_response": None 
         })
     
     return logs
