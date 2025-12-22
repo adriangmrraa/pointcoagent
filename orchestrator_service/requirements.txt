@@ -11,3 +11,4 @@ langchain-openai==0.0.5
 langchain-community==0.0.13
 python-dotenv
 prometheus-client
+requests
