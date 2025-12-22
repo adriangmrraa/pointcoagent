@@ -13,17 +13,18 @@ function detectApiBase() {
     // For production: infer api URL
     // Examples: 
     // - domain.com -> api.domain.com
-    // - ui.domain.com -> api.domain.com
+    // - platform-ui.domain.com -> orchestrator-service.domain.com
+    // - docker-platform-ui.host.com -> docker-orchestrator-service.host.com
 
     let hostname = currentLocation.hostname;
     let apiHostname = hostname;
 
-    if (hostname.startsWith('ui.')) {
+    if (hostname.includes('platform-ui')) {
+        apiHostname = hostname.replace('platform-ui', 'orchestrator-service');
+    } else if (hostname.startsWith('ui.')) {
         apiHostname = hostname.replace('ui.', 'api.');
-    } else if (hostname.startsWith('platform-ui.')) {
-        apiHostname = hostname.replace('platform-ui.', 'api.');
     } else {
-        // Assume root or other; prepend api.
+        // Fallback for custom domains: assume 'api.' prefix if not found
         apiHostname = `api.${hostname}`;
     }
 
