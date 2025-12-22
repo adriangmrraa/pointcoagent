@@ -345,103 +345,64 @@ class OrchestratorResponse(BaseModel):
 parser = PydanticOutputParser(pydantic_object=OrchestratorResponse)
 
 # Agent Initialization
-prompt_text = """Eres el asistente virtual de Pointe Coach (Paraná, Entre Ríos, Argentina), tienda de artículos de danza clásica y contemporánea.
+# --- Agent Factory (Dynamic per Tenant) ---
+async def get_agent_executable(tenant_phone: str = "5491100000000"):
+    """
+    Creates an AgentExecutor dynamically based on the Tenant's System Prompt in DB.
+    """
+    # 1. Fetch Tenant Context
+    tenant = await db.pool.fetchrow(
+        "SELECT system_prompt_template, store_catalog_knowledge FROM tenants WHERE bot_phone_number = $1", 
+        tenant_phone
+    )
+    
+    # Default Prompt if DB is empty or tenant not found
+    sys_template = ""
+    knowledge = ""
+    
+    if tenant and tenant['system_prompt_template']:
+        sys_template = tenant['system_prompt_template']
+        knowledge = tenant['store_catalog_knowledge'] or ""
+    else:
+        # Fallback Hardcoded (Pointe Coach default)
+        sys_template = """Eres el asistente virtual de Pointe Coach.
+PRIORIDADES:
+1. SALIDA: JSON.
+2. VERACIDAD: Usa tools.
+3. DIVISION: max 350 chars.
+GATE ABSOLUTO: Usa productsq si preguntan por productos.
+LINK WEB: https://www.pointecoach.shop/
+"""
 
-PRIORIDADES (ORDEN ABSOLUTO):
-1. SALIDA: Tu respuesta final SIEMPRE debe ser EXCLUSIVAMENTE en formato JSON siguiendo el esquema.
-2. VERACIDAD: Para catálogo, pedidos y cupones DEBES usar tools; prohibido inventar.
-3. DIVISIÓN: Si la respuesta es larga, divídela en varios objetos en `messages`. Cada burbuja de texto entre 250 y 350 caracteres.
-- PRODUCTOS: 1 burbuja por producto, formato: [Nombre] - Precio: $[Precio]. [Descripción]. Link: [URL].
-- DESCRIPCION: La descripción DEBE ser un extracto corto pero TEXTUAL de lo que devuelve la tool. Está TERMINANTEMENTE prohíbido inventar, parafrasear creativamente o agregar funciones que no estén en el texto original de la tienda.
+    # Inject variables if they exist in the template string (simple replacement)
+    # The user might have put {STORE_CATALOG_KNOWLEDGE} in the DB text.
+    if "{STORE_CATALOG_KNOWLEDGE}" in sys_template:
+        sys_template = sys_template.replace("{STORE_CATALOG_KNOWLEDGE}", knowledge)
 
-GATE ABSOLUTO DE CATÁLOGO:
-Si el usuario pregunta por productos, categorías, marcas o stock, DEBES ejecutar `productsq` o `productsq_category` en ese mismo turno. Prohibido listar productos si la tool no devuelve nada.
+    # 2. Construct Prompt Object
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", sys_template),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("user", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ]).partial(format_instructions=parser.get_format_instructions())
 
-REGLA DE PRODUCTOS Y VENTANEO (CRÍTICA):
-- LIMITE: Muestra máximo de 3 a 4 productos por cada respuesta.
-- LINK WEB: En la última burbuja de una lista de productos, DEBES agregar obligatorio: "Podés ver más opciones en nuestra web: https://www.pointecoach.shop/".
-- PAGINACIÓN: Si el usuario pide "ver más" o "qué más tienen", revisa el historial (`chat_history`). Muestra los siguientes 3 o 4 del resultado de la tool que NO fueron mostrados en la respuesta INMEDIATAMENTE anterior. Se permite repetir productos si aparecieron hace 2 o más turnos, pero NUNCA los de la respuesta previa.
+    # 3. Create Agent
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY missing")
 
-REGLA DE NORMALIZACIÓN Y BÚSQUEDA (CRÍTICA):
-No uses literalmente los términos del usuario si tienen errores ortográficos o son sinónimos vagos. Traduce la intención del usuario a los nombres reales de la tienda antes de llamar a la tool.
-- Ejemplo: Si el usuario dice "matatarsiana", busca `productsq(q="metatarsianas")`.
-- Ejemplo: Si el usuario dice "capiezo", busca `productsq(q="capezio")`.
+    llm = ChatOpenAI(
+        model="gpt-4-turbo-preview",  # Upgraded for better instruction following
+        api_key=OPENAI_API_KEY, 
+        temperature=0, 
+        max_tokens=1500
+    )
+    
+    agent_def = create_openai_functions_agent(llm, tools, prompt)
+    return AgentExecutor(agent=agent_def, tools=tools, verbose=True)
 
-CONOCIMIENTO OFICIAL DE LA TIENDA (Bases para normalizar):
-- Accesorios: Metatarsianas, Bolsa de red, Elásticos, Cintas de satén y elastizadas, Endurecedor para puntas, Accesorios para el pie, Punteras, Protectores de puntas.
-- Medias: Medias convertibles, Socks, Medias de contemporáneo, Medias poliamida, Medias de patín.
-- Zapatillas: Zapatillas de punta, Zapatillas de media punta.
-- Marcas: Pointe Coach, Grishko, Capezio, Sansha.
-
-CUÁNDO USAR CADA TOOL:
-- CATALOGO: `productsq` (búsqueda general) o `productsq_category` (categoría).
-- CUPONES: `cupones_list` ante cualquier pregunta de descuento/promo (vía MCP).
-- PEDIDOS: `orders` ante cualquier pregunta de estado_pedido (ID de orden obligatorio). Prohibido inventar estados.
-- DERIVACIÓN: `sendemail` (vía MCP) SOLO si piden hablar con un humano, fitting coordinado, o si hay un problema técnico/reclamo que no puedes resolver.
-
-ESTRUCTURA OBLIGATORIA DE EMAIL (sendemail):
-El cuerpo del mensaje (`text`) DEBE seguir este formato exacto:
-
-Hola, te derivo un caso para atención.
-
-Fecha/hora: [FECHA_ACTUAL] [HORA_ACTUAL]
-Cliente: [NOMBRE_SI_EXISTE]
-Teléfono (WhatsApp): [TELEFONO_SI_EXISTE]
-Link directo al chat: https://wa.me/[TELEFONO_SOLO_NUMEROS]
-Motivo de derivación: [BREVE_MOTIVO]
-
-Resumen:
-[1 O 2 LINEAS DE RESUMEN DEL CASO]
-
-Detalle del cliente (extracto):
-"[CITA_TEXTUAL_DEL_ULTIMO_MENSAJE_RELEVANTE]"
-
-Acción requerida:
-[QUE_DEBE_HACER_EL_HUMANO]
-
-Gracias.
-
-REGLAS DE CIERRE Y CTA (OBLIGATORIO):
-SIEMPRE debes incluir una burbuja FINAL dentro de la lista `messages` con una pregunta de tipo Call to Action (CTA) que invite a seguir la conversación. Esta burbuja debe ser el último objeto del JSON y tener su correspondiente `part` y `total`.
-
-Ejemplos sugeridos:
-- "¿Querés que te muestre leotardos de otras marcas o algún otro producto de danza?"
-- "¿Querés que te informe stock o talles específicos de alguna de estas zapatillas?"
-- "Al ser tu primera compra, te recomiendo hacer un fitting. ¿Querés que te ayude a coordinar un turno?"
-- "¿Querés que te recomiende hacer fitting para elegir la zapatilla correcta?"
-
-REGLAS DE PEDIDOS (IMAGEN):
-Si informas el estado de un pedido (`orders`), intenta extraer la URL de la imagen de uno de los productos incluidos y asígnala al campo `imageUrl` de la primera burbuja de la respuesta. El usuario debe ver qué compró.
-
-REGLAS DE FORMATO:
-- URLs: Usa solo el permalink (PROHIBIDO markdown).
-- Imágenes: Si un producto tiene imagen, usa `imageUrl`.
-- Burbujas: Cada objeto en `messages` debe tener `part` (ej: 1) y `total` (ej: 4). La burbuja del CTA es la última (ej: 4 de 4).
-- Fitting: Si es primera vez o cambia de modelo, recomendá fitting y ofrecé derivar.
-
-{format_instructions}
-
-Contexto de la conversación:
-{chat_history}"""
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", prompt_text),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("user", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad"),
-]).partial(format_instructions=parser.get_format_instructions())
-
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set.")
-
-llm = ChatOpenAI(
-    model="gpt-4.1-mini", 
-    api_key=OPENAI_API_KEY, 
-    temperature=0, 
-    openai_api_key=OPENAI_API_KEY,
-    max_tokens=2000 # Increased to prevent truncation
-)
-agent = create_openai_functions_agent(llm, tools, prompt)
+# Global fallback for health checks (optional)
+# agent = ... (Removed global instantiation to force per-request dynamic loading)
 
 # Middleware
 @app.middleware("http")
@@ -497,56 +458,6 @@ async def chat(event: InboundChatEvent, x_internal_token: Optional[str] = Header
     start_time = time.time()
     
     user_hash = hashlib.sha256(event.from_number.encode()).hexdigest()
-    # Increased timeout to 80s to give more 'air' for complex tool calls
-    lock = redis_client.lock(f"lock:from_number:{user_hash}", timeout=80)
-    acquired = lock.acquire(blocking=True, blocking_timeout=2)
-    if not acquired:
-        log.warning("lock_busy")
-        # No need to mark inbound failed here, as it's a concurrency issue, not a processing failure
-        return OrchestratorResult(status="error", send=False, meta={"reason": "lock_busy"})
-
-    try:
-        # 1. Dedupe
-        is_new = await db.try_insert_inbound(
-            event.provider, event.provider_message_id, event.event_id, 
-            event.from_number, event.dict(), correlation_id
-        )
-        if not is_new:
-            log.info("duplicate_message")
-            return OrchestratorResult(status="duplicate", send=False)
-
-        await db.mark_inbound_processing(event.provider, event.provider_message_id)
-
-        # 2. History
-        history_records = await db.get_chat_history(event.from_number, limit=10)
-        chat_history = []
-        for h in history_records:
-            if h.get('role') == 'user':
-                chat_history.append(HumanMessage(content=h['content']))
-            elif h.get('role') == 'assistant':
-                chat_history.append(AIMessage(content=h['content']))
-
-        # 3. Agent
-        agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-        output_text = "Lo siento, tuve un problema al procesar tu mensaje."
-        result_messages = []
-        
-        try:
-            response = await agent_executor.ainvoke({"input": event.text, "chat_history": chat_history})
-            raw_output = response.get("output", "")
-            
-            # Layer 1: Intelligent Post-Processor
-            def clean_json(text: str):
-                text = text.strip()
-                if "```" in text:
-                    try:
-                        inner = text.split("```")[1]
-                        if inner.startswith("json"): inner = inner[4:]
-                        return inner.strip()
-                    except: pass
-                return text
-
-            try:
                 parsed = parser.parse(clean_json(raw_output))
                 result_messages = parsed.messages
             except Exception as parse_err:
