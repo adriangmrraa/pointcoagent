@@ -1145,17 +1145,17 @@ function updateChecklist(bootstrap) {
         tenantCheck.style.color = 'var(--success)';
     }
 
-    // Tienda Nube check (would need to check if credentials exist)
-    // For now, assume if tenant exists, TN is configured
-    if (bootstrap.tenants_count > 0) {
+    // Tienda Nube check
+    if (bootstrap.configured_services && bootstrap.configured_services.includes('tiendanube')) {
         tnCheck.querySelector('.check-status').textContent = '✅';
         tnCheck.style.color = 'var(--success)';
     }
 
-    // OpenAI check (would need to check if OPENAI_API_KEY is set)
-    // For now, assume it's configured if system is running
-    openaiCheck.querySelector('.check-status').textContent = '✅';
-    openaiCheck.style.color = 'var(--success)';
+    // OpenAI check
+    if (bootstrap.configured_services && bootstrap.configured_services.includes('openai')) {
+        openaiCheck.querySelector('.check-status').textContent = '✅';
+        openaiCheck.style.color = 'var(--success)';
+    }
 }
 
 function copyWebhookUrl() {
