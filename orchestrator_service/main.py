@@ -455,10 +455,10 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
          
     # message deduplication logic...
     event_id = event.event_id
-    if await redis_client.get(f"processed:{event_id}"):
+    if redis_client.get(f"processed:{event_id}"):
         return OrchestratorResult(status="duplicate", send=False)
         
-    await redis_client.set(f"processed:{event_id}", "1", ex=86400)
+    redis_client.set(f"processed:{event_id}", "1", ex=86400)
 
     # Chat History
     session_id = f"{event.from_number}"
