@@ -101,8 +101,52 @@ async def lifespan(app: FastAPI):
     try:
         await db.connect()
         logger.info("db_connected")
+        
+        # --- Auto-Migration for EasyPanel ---
+        # Since the db/ folder isn't copied to the container, we inline the critical schema here.
+        migration_sql = """
+        -- 002_platform_schema.sql
+        CREATE TABLE IF NOT EXISTS tenants (
+            id SERIAL PRIMARY KEY,
+            store_name TEXT NOT NULL,
+            bot_phone_number TEXT UNIQUE NOT NULL,
+            owner_email TEXT,
+            store_location TEXT,
+            store_website TEXT,
+            store_description TEXT,
+            store_catalog_knowledge TEXT,
+            tiendanube_store_id TEXT,
+            tiendanube_access_token TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS credentials (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            value TEXT NOT NULL,
+            category TEXT,
+            scope TEXT DEFAULT 'global',
+            tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+            description TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        
+        -- 003_advanced_features.sql
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS system_prompt_template TEXT;
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tokens_used BIGINT DEFAULT 0;
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tool_calls BIGINT DEFAULT 0;
+        
+        INSERT INTO tenants (store_name, bot_phone_number) 
+        VALUES ('Pointe Coach', '5491100000000') 
+        ON CONFLICT (bot_phone_number) DO NOTHING;
+        """
+        # Execute migration
+        await db.pool.execute(migration_sql)
+        logger.info("db_migrations_applied")
+        
     except Exception as e:
-        logger.error("db_connection_failed", error=str(e))
+        logger.error("startup_error", error=str(e))
         # Don't raise here if you want to allow app to start even if DB is down temporarily,
         # but for critical DB apps, maybe better to fail.
     
