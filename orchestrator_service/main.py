@@ -391,32 +391,32 @@ def call_tiendanube_api(endpoint: str, params: dict = None):
 
 @tool
 def productsq(q: str):
-    """Search for products by keyword in Tienda Nube. Returns top 5 results simplified."""
+    """Search for products by keyword in Tienda Nube. Returns top 3 results simplified."""
     cache_key = f"productsq:{q}"
     cached = get_cached_tool(cache_key)
     if cached: return cached
-    result = call_tiendanube_api("/products", {"q": q, "per_page": 5})
+    result = call_tiendanube_api("/products", {"q": q, "per_page": 3})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
     return result
 
 @tool
 def productsq_category(category: str, keyword: str):
-    """Search for products by category and keyword in Tienda Nube. Returns top 5 results simplified."""
+    """Search for products by category and keyword in Tienda Nube. Returns top 3 results simplified."""
     q = f"{category} {keyword}"
     cache_key = f"productsq_category:{category}:{keyword}"
     cached = get_cached_tool(cache_key)
     if cached: return cached
-    result = call_tiendanube_api("/products", {"q": q, "per_page": 5})
+    result = call_tiendanube_api("/products", {"q": q, "per_page": 3})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
     return result
 
 @tool
 def productsall():
-    """Get a general list of products from Tienda Nube (Top 5)."""
+    """Get a general list of products from Tienda Nube (Top 3)."""
     cache_key = "productsall"
     cached = get_cached_tool(cache_key)
     if cached: return cached
-    result = call_tiendanube_api("/products", {"per_page": 5})
+    result = call_tiendanube_api("/products", {"per_page": 3})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
     return result
 
@@ -499,10 +499,10 @@ LINK WEB: https://www.pointecoach.shop/
         raise ValueError("OPENAI_API_KEY missing")
 
     llm = ChatOpenAI(
-        model="gpt-5-mini",  # Upgraded for rate limits and speed
+        model="gpt-4o-mini",
         api_key=OPENAI_API_KEY, 
-        # temperature=0, # Not supported by this model (o1-mini alias)
-        max_completion_tokens=1500
+        temperature=0, 
+        max_tokens=2000
     )
     
     agent_def = create_openai_functions_agent(llm, tools, prompt)
