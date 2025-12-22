@@ -57,9 +57,12 @@ logger = structlog.get_logger()
 redis_client = redis.from_url(REDIS_URL)
 
 # --- Shared Models ---
+# --- Shared Models ---
 class ToolError(BaseModel):
-    error: str
-    details: Optional[str] = None
+    code: str = Field(..., description="Error code")
+    message: str
+    retryable: bool
+    details: Optional[Dict[str, Any]] = None
 
 # --- Application Startup ---
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,7 +74,8 @@ origins = [
     "http://localhost:5173",
     "http://localhost:4173",
     "https://docker-frontend-react.yn8wow.easypanel.host",
-    "https://docker-platform-ui.yn8wow.easypanel.host", # Fallback legacy
+    "https://docker-platform-ui.yn8wow.easypanel.host",
+    "https://docker-bff-service.yn8wow.easypanel.host"
 ]
 
 app.add_middleware(
@@ -81,10 +85,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-    code: str = Field(..., description="Error code")
-    message: str
-    retryable: bool
-    details: Optional[Dict[str, Any]] = None
 
 class ToolResponse(BaseModel):
     ok: bool
