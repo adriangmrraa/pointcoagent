@@ -520,12 +520,19 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
     sys_template = ""
     knowledge = ""
     
+    store_name = "Pointe Coach"
+    store_url = "https://www.pointecoach.shop"
+    
+    if tenant:
+        store_name = tenant.get('store_name') or store_name
+        store_url = tenant.get('store_website') or store_url
+
     if tenant and tenant['system_prompt_template']:
         sys_template = tenant['system_prompt_template']
         knowledge = tenant['store_catalog_knowledge'] or ""
     else:
-        # Fallback Hardcoded (Pointe Coach default)
-        sys_template = """Eres el asistente virtual de Pointe Coach.
+        # Dynamic Fallback Prompt
+        sys_template = f"""Eres el asistente virtual de {store_name}.
 REGLAS CRÍTICAS DE RESPUESTA:
 1. SALIDA: Responde SIEMPRE con el formato JSON de OrchestratorResponse (una lista de objetos "messages").
 2. NUNCA envíes un objeto JSON crudo como respuesta final (ejemplo: {{ "zapatillas": [...] }}). Traduce todo a mensajes amigables.
@@ -537,7 +544,7 @@ REGLAS CRÍTICAS DE RESPUESTA:
    - Burbuja 5: Descripción y link del producto 2.
    - Burbuja 6: SOLO la imageUrl del producto 3 (si hay).
    - Burbuja 7: Descripción y link del producto 3 (si hay).
-   - Burbuja 8: CTA Final con link a la web general (https://www.pointecoach.shop) o invitación a Fitting si son puntas.
+   - Burbuja 8: CTA Final con link a la web general ({store_url}) o invitación a Fitting si son puntas.
 4. FITTING: Si el usuario pregunta por "zapatillas de punta" por primera vez, recomienda SIEMPRE un fitting en la Burbuja 8.
 5. NO inventes enlaces. Usa los devueltos por las tools.
 """
