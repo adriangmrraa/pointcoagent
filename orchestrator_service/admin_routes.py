@@ -66,32 +66,38 @@ class CredentialModel(BaseModel):
 # --- Helper: Sync Environment to DB ---
 async def sync_environment():
     """Reads env vars and ensures the default tenant and credentials exist."""
-    # 1. Tenant Sync
-    store_name = os.getenv("STORE_NAME", "Pointe Coach")
-    store_phone = os.getenv("BOT_PHONE_NUMBER", "5491100000000")
-    store_id = os.getenv("TIENDANUBE_STORE_ID", "")
-    access_token = os.getenv("TIENDANUBE_ACCESS_TOKEN", "")
-    store_loc = os.getenv("STORE_LOCATION", "Paraná, Entre Ríos, Argentina")
-    store_web = os.getenv("STORE_WEBSITE", "https://www.pointecoach.shop/")
-    store_desc = os.getenv("STORE_DESCRIPTION", "")
-    store_know = os.getenv("STORE_CATALOG_KNOWLEDGE", "")
+    # 1. Tenant Sync - Only if explicitly provided in environment
+    store_name = os.getenv("STORE_NAME")
+    store_phone = os.getenv("BOT_PHONE_NUMBER")
     
-    q_tenant = """
-        INSERT INTO tenants (
-            store_name, bot_phone_number, 
-            tiendanube_store_id, tiendanube_access_token,
-            store_location, store_website,
-            store_description, store_catalog_knowledge
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (bot_phone_number) 
-        DO UPDATE SET 
-            tiendanube_store_id = CASE WHEN EXCLUDED.tiendanube_store_id <> '' THEN EXCLUDED.tiendanube_store_id ELSE tenants.tiendanube_store_id END,
-            tiendanube_access_token = CASE WHEN EXCLUDED.tiendanube_access_token <> '' THEN EXCLUDED.tiendanube_access_token ELSE tenants.tiendanube_access_token END,
-            updated_at = NOW()
-        RETURNING id
-    """
-    tenant_id = await db.pool.fetchval(q_tenant, store_name, store_phone, store_id, access_token, store_loc, store_web, store_desc, store_know)
+    if store_name and store_phone:
+        store_id = os.getenv("TIENDANUBE_STORE_ID", "")
+        access_token = os.getenv("TIENDANUBE_ACCESS_TOKEN", "")
+        store_loc = os.getenv("STORE_LOCATION", "Paraná, Entre Ríos, Argentina")
+        store_web = os.getenv("STORE_WEBSITE", "https://www.pointecoach.shop/")
+        store_desc = os.getenv("STORE_DESCRIPTION", "")
+        store_know = os.getenv("STORE_CATALOG_KNOWLEDGE", "")
+        
+        q_tenant = """
+            INSERT INTO tenants (
+                store_name, bot_phone_number, 
+                tiendanube_store_id, tiendanube_access_token,
+                store_location, store_website,
+                store_description, store_catalog_knowledge
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (bot_phone_number) 
+            DO UPDATE SET 
+                tiendanube_store_id = CASE WHEN EXCLUDED.tiendanube_store_id <> '' THEN EXCLUDED.tiendanube_store_id ELSE tenants.tiendanube_store_id END,
+                tiendanube_access_token = CASE WHEN EXCLUDED.tiendanube_access_token <> '' THEN EXCLUDED.tiendanube_access_token ELSE tenants.tiendanube_access_token END,
+                updated_at = NOW()
+            RETURNING id
+        """
+        await db.pool.fetchval(q_tenant, store_name, store_phone, store_id, access_token, store_loc, store_web, store_desc, store_know)
+    else:
+        # If env vars are missing, we don't force a tenant sync.
+        # This allows users to manage tenants entirely via the UI.
+        pass
 
     # 2. Credentials Sync (Auto-populate from Env)
     env_creds = [
