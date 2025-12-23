@@ -105,7 +105,7 @@ class InboundChatEvent(BaseModel):
 class OrchestratorMessage(BaseModel):
     part: Optional[int] = Field(None, description="The sequence number of this message.")
     total: Optional[int] = Field(None, description="The total number of messages.")
-    text: str = Field(..., description="The text content of this message burst.")
+    text: Optional[str] = Field(None, description="The text content of this message burst.")
     imageUrl: Optional[str] = Field(None, description="The URL of the product image (images[0].src from tools), or null if no image is available.")
 
 class OrchestratorResult(BaseModel):

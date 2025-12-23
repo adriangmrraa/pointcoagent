@@ -47,7 +47,7 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 class OrchestratorMessage(BaseModel):
     part: Optional[int] = None
     total: Optional[int] = None
-    text: str
+    text: Optional[str] = None
     imageUrl: Optional[str] = None
     needs_handoff: bool = False
     handoff: Optional[str] = None
