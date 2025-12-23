@@ -542,10 +542,7 @@ async def delete_credential(id: int):
 
 @router.get("/media/{media_id}", dependencies=[Depends(verify_admin_token)])
 async def get_media(media_id: str):
-    """
-    Proxy media from YCloud to frontend (securely).
-    We act as a stream proxy so frontend doesn't need YCloud credentials.
-    """
+    """Proxy media from YCloud to frontend securely. Acts as a stream proxy."""
     # 1. Get YCloud Creds
     # In a real app we'd resolve tenant from request or media owner, 
     # but for now we fallback to global env/creds
