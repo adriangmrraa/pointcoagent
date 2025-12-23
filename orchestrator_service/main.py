@@ -138,6 +138,13 @@ async def lifespan(app: FastAPI):
         await db.connect()
         logger.info("db_connected")
         
+        # Sync Environment Tenants
+        try:
+            await sync_environment()
+            logger.info("environment_synced")
+        except Exception as e:
+            logger.error("environment_sync_failed", error=str(e))
+        
         # --- Auto-Migration for EasyPanel ---
         # Since the db/ folder isn't copied to the container, we inline the critical schema here.
         migration_sql = """
@@ -229,7 +236,8 @@ async def health_check():
     return {"status": "ok", "service": "orchestrator"}
 
 # --- Include Admin Router ---
-from admin_routes import router as admin_router
+# --- Include Admin Router ---
+from admin_routes import router as admin_router, sync_environment
 app.include_router(admin_router)
 
 # Metrics
