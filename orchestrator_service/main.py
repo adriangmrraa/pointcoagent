@@ -543,9 +543,9 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
         sys_template = f"""Eres el asistente virtual de {store_name}.
 REGLAS CRÍTICAS DE RESPUESTA:
 1. SALIDA: Responde SIEMPRE con el formato JSON de OrchestratorResponse (una lista de objetos "messages").
-2. NUNCA envíes un objeto JSON crudo como respuesta final (ejemplo: {{{{ "zapatillas": [...] }}}}). Traduce todo a mensajes amigables.
+2. ESTILO: Tus respuestas deben ser naturales y amigables. El contenido de los mensajes NO debe parecer datos crudos.
 3. SECUENCIA DE BURBUJAS (8 pasos para productos):
-   - Burbuja 1: Introducción amigable (ej: "Te muestro opciones de bolsos disponibles...").
+   - Burbuja 1: Introducción amigable (ej: "Saluda si te han saludado, luego di Te muestro opciones de bolsos disponibles...").
    - Burbuja 2: SOLO la imageUrl del producto 1.
    - Burbuja 3: Nombre, precio, variante/stock y LINK a la web del producto 1.
    - Burbuja 4: SOLO la imageUrl del producto 2.
@@ -697,13 +697,29 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
         elif isinstance(output, str):
             try:
                 # Try to parse string as JSON first
-                # Try to parse string as JSON using robust regex
-                cleaned = output.strip()
-                match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-                if match:
-                    cleaned = match.group(0)
+                # Multi-pass decoding to handle double-encoded JSON strings
+                parsed = output
+                for _ in range(3):
+                    if isinstance(parsed, str):
+                        cleaned = parsed.strip()
+                        # Clean Markdown if present
+                        if cleaned.startswith("```json"): cleaned = cleaned[7:].split("```")[0]
+                        if cleaned.startswith("```"): cleaned = cleaned[3:].split("```")[0]
+                        
+                        try:
+                            parsed = json.loads(cleaned)
+                        except json.JSONDecodeError:
+                            # If direct parse fails, try regex extraction for embedded JSON
+                            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+                            if match:
+                                try: parsed = json.loads(match.group(0))
+                                except: break
+                            else:
+                                break
+                    else:
+                        break
                 
-                parsed_json = json.loads(cleaned.strip())
+                parsed_json = parsed
                 
                 # Recursively apply Case B logic
                 if isinstance(parsed_json, dict):
