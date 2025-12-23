@@ -80,55 +80,9 @@ class ToolError(BaseModel):
     retryable: bool
     details: Optional[Dict[str, Any]] = None
 
-# FastAPI App Initialization
-app = FastAPI(
-    title="Orchestrator Service",
-    description="Central intelligence for Kilocode microservices.",
-    version="1.1.0",
-    lifespan=lifespan
-)
-
-# CORS Configuration - Broadly permissive for administrative UI
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class ToolResponse(BaseModel):
-    ok: bool
-    data: Optional[Any] = None
-    error: Optional[ToolError] = None
-    meta: Optional[Dict[str, Any]] = None
-
-class InboundChatEvent(BaseModel):
-    provider: str
-    event_id: str
-    provider_message_id: str
-    from_number: str
-    to_number: Optional[str] = None
-    text: str
-    customer_name: Optional[str] = None
-    event_type: str
-    correlation_id: str
-
-class OrchestratorMessage(BaseModel):
-    part: Optional[int] = Field(None, description="The sequence number of this message.")
-    total: Optional[int] = Field(None, description="The total number of messages.")
-    text: Optional[str] = Field(None, description="The text content of this message burst.")
-    imageUrl: Optional[str] = Field(None, description="The URL of the product image (images[0].src from tools), or null if no image is available.")
-
-class OrchestratorResult(BaseModel):
-    status: Literal["ok", "duplicate", "ignored", "error"]
-    send: bool
-    text: Optional[str] = None
-    messages: List[OrchestratorMessage] = Field(default_factory=list)
-    meta: Optional[Dict[str, Any]] = None
-
 # FastAPI App
 from contextlib import asynccontextmanager
+from admin_routes import router as admin_router, sync_environment
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -258,6 +212,54 @@ CATALOGO:
     await db.disconnect()
     logger.info("db_disconnected")
 
+# FastAPI App Initialization
+app = FastAPI(
+    title="Orchestrator Service",
+    description="Central intelligence for Kilocode microservices.",
+    version="1.1.0",
+    lifespan=lifespan
+)
+
+# CORS Configuration - Broadly permissive for administrative UI
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class ToolResponse(BaseModel):
+    ok: bool
+    data: Optional[Any] = None
+    error: Optional[ToolError] = None
+    meta: Optional[Dict[str, Any]] = None
+
+class InboundChatEvent(BaseModel):
+    provider: str
+    event_id: str
+    provider_message_id: str
+    from_number: str
+    to_number: Optional[str] = None
+    text: str
+    customer_name: Optional[str] = None
+    event_type: str
+    correlation_id: str
+
+class OrchestratorMessage(BaseModel):
+    part: Optional[int] = Field(None, description="The sequence number of this message.")
+    total: Optional[int] = Field(None, description="The total number of messages.")
+    text: Optional[str] = Field(None, description="The text content of this message burst.")
+    imageUrl: Optional[str] = Field(None, description="The URL of the product image (images[0].src from tools), or null if no image is available.")
+
+class OrchestratorResult(BaseModel):
+    status: Literal["ok", "duplicate", "ignored", "error"]
+    send: bool
+    text: Optional[str] = None
+    messages: List[OrchestratorMessage] = Field(default_factory=list)
+    meta: Optional[Dict[str, Any]] = None
+
+
 # (Middleware and app instance moved to top)
 
 @app.get("/health")
@@ -265,8 +267,6 @@ async def health_check():
     return {"status": "ok", "service": "orchestrator"}
 
 # --- Include Admin Router ---
-# --- Include Admin Router ---
-from admin_routes import router as admin_router, sync_environment
 app.include_router(admin_router)
 
 # Metrics
