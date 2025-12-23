@@ -42,6 +42,10 @@ INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 POSTGRES_DSN = os.getenv("POSTGRES_DSN")
 
+# Fallback Tienda Nube credentials (from Env Vars)
+GLOBAL_TN_STORE_ID = os.getenv("TIENDANUBE_STORE_ID")
+GLOBAL_TN_ACCESS_TOKEN = os.getenv("TIENDANUBE_ACCESS_TOKEN")
+
 if not OPENAI_API_KEY:
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
     if not OPENAI_API_KEY:
@@ -168,13 +172,9 @@ async def lifespan(app: FastAPI):
         ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tokens_used BIGINT DEFAULT 0;
         ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tool_calls BIGINT DEFAULT 0;
         
-        INSERT INTO tenants (
-            store_name, bot_phone_number, 
-            store_location, store_website, store_description, store_catalog_knowledge
-        ) VALUES (
-            'Pointe Coach', '5491100000000',
-            'Parana, Entre Rios', 'https://www.pointecoach.shop/', 'Tienda de danza', '...'
-        ) ON CONFLICT (bot_phone_number) DO NOTHING;
+        -- 003_advanced_features.sql
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tokens_used BIGINT DEFAULT 0;
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tool_calls BIGINT DEFAULT 0;
         
         -- Update Prompt if null (stricter version)
         UPDATE tenants 
@@ -498,12 +498,23 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
     )
 
     # Set context variables for this execution
-    if tenant:
-        logger.info("tenant_found", store_name=tenant['store_name'], store_id=tenant['tiendanube_store_id'])
-        tenant_store_id.set(tenant['tiendanube_store_id'])
-        tenant_access_token.set(tenant['tiendanube_access_token'])
+    # USER PRIORITY: Env Vars > DB
+    if GLOBAL_TN_STORE_ID and GLOBAL_TN_ACCESS_TOKEN:
+        logger.info("using_global_env_credentials", store_id=GLOBAL_TN_STORE_ID)
+        tenant_store_id.set(GLOBAL_TN_STORE_ID)
+        tenant_access_token.set(GLOBAL_TN_ACCESS_TOKEN)
+    elif tenant:
+        local_store_id = tenant['tiendanube_store_id']
+        local_token = tenant['tiendanube_access_token']
+        
+        if local_store_id and local_token:
+            logger.info("tenant_found_in_db", store_name=tenant['store_name'], store_id=local_store_id)
+            tenant_store_id.set(local_store_id)
+            tenant_access_token.set(local_token)
+        else:
+            logger.warning("tenant_record_missing_credentials", store_name=tenant['store_name'])
     else:
-        logger.warning("tenant_not_found", searched_phone=clean_phone)
+        logger.warning("no_credentials_found", searched_phone=clean_phone, note="Check both Env Vars and DB 'tenants' table")
     
     # Default Prompt if DB is empty or tenant not found
     sys_template = ""
