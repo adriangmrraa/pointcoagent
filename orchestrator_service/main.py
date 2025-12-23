@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
 
         -- 1. chat_conversations
         CREATE TABLE IF NOT EXISTS chat_conversations (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id UUID PRIMARY KEY,
             tenant_id INTEGER REFERENCES tenants(id), -- Adapted for compat
             channel VARCHAR(32) NOT NULL, 
             external_user_id VARCHAR(128) NOT NULL,
@@ -199,7 +199,7 @@ async def lifespan(app: FastAPI):
 
         -- 2. chat_media
         CREATE TABLE IF NOT EXISTS chat_media (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id UUID PRIMARY KEY,
             tenant_id INTEGER, 
             channel VARCHAR(32) NOT NULL,
             provider_media_id VARCHAR(128),
@@ -214,7 +214,7 @@ async def lifespan(app: FastAPI):
 
         -- 3. chat_messages
         CREATE TABLE IF NOT EXISTS chat_messages (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id UUID PRIMARY KEY,
             tenant_id INTEGER, 
             conversation_id UUID NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
             role VARCHAR(32) NOT NULL,
@@ -295,7 +295,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS Configuration - Broadly permissive for administrative UI
+# CORS Configuration - Broadly permissive
+# This MUST be the first middleware added
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -303,6 +304,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Root Endpoint for basic health checks (Traefik/EasyPanel)
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "orchestrator", "version": "1.1.0"}
 
 class ToolResponse(BaseModel):
     ok: bool
@@ -830,19 +836,18 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             is_locked = True
     else:
         # Create new conversation
-        # Need tenant_id. Resolve from tokens or default.
-        # Since 'tenants' table exists, we should try to link it.
-        # Lookup by to_number (Bot Phone)
+        # Need tenant_id. Resolve from tenants table or default
         tenant_row = await db.pool.fetchrow("SELECT id FROM tenants WHERE bot_phone_number = $1", event.to_number)
-        tenant_id = tenant_row['id'] if tenant_row else 1 # Default to 1 if not found
+        tenant_id = tenant_row['id'] if tenant_row else 1 
         
+        new_conv_id = str(uuid.uuid4())
         conv_id = await db.pool.fetchval("""
             INSERT INTO chat_conversations (
                 id, tenant_id, channel, external_user_id, display_name, status, created_at, updated_at
             ) VALUES (
-                gen_random_uuid(), $1, $2, $3, $4, 'open', NOW(), NOW()
+                $1, $2, $3, $4, $5, 'open', NOW(), NOW()
             ) RETURNING id
-        """, tenant_id, channel, event.from_number, event.customer_name or event.from_number)
+        """, new_conv_id, tenant_id, channel, event.from_number, event.customer_name or event.from_number)
 
     # --- 2. Handle Echoes (Human Messages from App) ---
     is_echo = False
@@ -871,10 +876,10 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
                 id, tenant_id, conversation_id, role, content, 
                 human_override, sent_from, sent_context, created_at
             ) VALUES (
-                gen_random_uuid(), (SELECT tenant_id FROM chat_conversations WHERE id=$1), $1, 'human_supervisor', $2,
+                $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'human_supervisor', $3,
                 TRUE, 'webhook', 'whatsapp_echo', NOW()
             )
-        """, conv_id, event.text)
+        """, str(uuid.uuid4()), conv_id, event.text)
         
         return OrchestratorResult(status="ignored", send=False, text="Echo handled")
         
@@ -887,15 +892,17 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
         m = event.media[0] # Assuming single media per message for now
         message_type = m.type
         # Persist Media
+        # Persist Media
+        media_uuid = str(uuid.uuid4())
         media_id = await db.pool.fetchval("""
             INSERT INTO chat_media (
                 id, tenant_id, channel, provider_media_id, media_type, 
                 mime_type, file_name, storage_url, created_at
             ) VALUES (
-                gen_random_uuid(), $1, $2, $3, $4, 
-                $5, $6, $7, NOW()
+                $1, $2, $3, $4, $5, 
+                $6, $7, $8, NOW()
             ) RETURNING id
-        """, tenant_id, channel, m.provider_id, m.type, m.mime_type or "application/octet-stream", m.file_name, m.url)
+        """, media_uuid, tenant_id, channel, m.provider_id, m.type, m.mime_type or "application/octet-stream", m.file_name, m.url)
     
     # Store User Message
     correlation_id = event.correlation_id or str(uuid.uuid4())
@@ -906,10 +913,10 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             id, tenant_id, conversation_id, role, content, 
             correlation_id, created_at, message_type, media_id
         ) VALUES (
-            gen_random_uuid(), (SELECT tenant_id FROM chat_conversations WHERE id=$1), $1, 'user', $2,
-            $3, NOW(), $4, $5
+            $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'user', $3,
+            $4, NOW(), $5, $6
         )
-    """, conv_id, content, correlation_id, message_type, media_id)
+    """, str(uuid.uuid4()), conv_id, content, correlation_id, message_type, media_id)
     
     # Update Conversation Metadata
     preview_text = content[:50] if content else f"[{message_type}]"
@@ -1051,9 +1058,9 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             INSERT INTO chat_messages (
                 id, tenant_id, conversation_id, role, content, correlation_id, created_at
             ) VALUES (
-                gen_random_uuid(), (SELECT tenant_id FROM chat_conversations WHERE id=$1), $1, 'assistant', $2, $3, NOW()
+                $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'assistant', $3, $4, NOW()
             )
-        """, conv_id, raw_output_str, correlation_id)
+        """, str(uuid.uuid4()), conv_id, raw_output_str, correlation_id)
         
         # Track Usage
         await db.pool.execute("UPDATE tenants SET total_tool_calls = total_tool_calls + 1 WHERE bot_phone_number = $1", event.from_number)

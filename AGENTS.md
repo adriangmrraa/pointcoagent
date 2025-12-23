@@ -109,6 +109,129 @@ Durante el bloqueo:
 *   `GET /admin/credentials`: Lista credenciales (masked).
 *   `POST /admin/credentials`: Crea o actualiza credenciales (atomic upsert).
 
+## 📊 Observabilidad, Dashboard y Métricas (Single Source of Truth)
+
+El sistema expone métricas operativas y de negocio a través del **Platform UI**.
+Estas métricas **NO son decorativas** y **NO pueden ser simuladas**.
+
+### Principio Fundamental
+
+> **PostgreSQL es la ÚNICA fuente de verdad para métricas.**
+> No se permite calcular métricas desde:
+>
+> * Logs
+> * Estados en memoria
+> * Contadores del agente
+> * Heurísticas del frontend
+
+Toda métrica debe ser **auditables mediante SQL**.
+
+---
+
+### Dashboard (Vista Ejecutiva)
+
+El Dashboard muestra un resumen **en tiempo real** del estado conversacional del sistema, derivado de:
+
+* `chat_conversations`
+* `chat_messages`
+* `chat_media`
+
+#### Métricas obligatorias
+
+* **Conversaciones activas**
+
+  * `status = open`
+
+* **Conversaciones bloqueadas por humano**
+
+  * `status = human_override`
+
+* **Total de mensajes**
+
+  * `COUNT(chat_messages)`
+
+* **Mensajes enviados por IA**
+
+  * `role = assistant`
+
+* **Mensajes enviados por humanos**
+
+  * `role = human_supervisor`
+
+* **Última actividad**
+
+  * `MAX(chat_conversations.last_message_at)`
+
+⚠️ Está prohibido mostrar valores hardcodeados o aproximados.
+
+---
+
+### Métricas Avanzadas (Analytics)
+
+Las métricas avanzadas permiten análisis operativo y estratégico.
+
+Incluyen, como mínimo:
+
+#### Distribución por canal
+
+* WhatsApp / Instagram / Facebook
+
+#### Ratio Humano vs IA
+
+* Intervenciones humanas reales
+* Escalaciones por conversación
+
+#### Tiempo medio de respuesta de IA
+
+* Diferencia entre mensaje `user` y siguiente `assistant`
+
+#### Uso de media
+
+* Imágenes
+* Audios
+* Documentos
+
+#### Conversaciones con HITL
+
+* Conversaciones que entraron en `human_override`
+
+---
+
+### Endpoints Admin de Métricas
+
+El Orchestrator expone endpoints **read-only**:
+
+```
+GET /admin/dashboard
+GET /admin/metrics
+```
+
+Reglas:
+
+* Filtrados por `tenant_id`
+* SQL real (queries agregadas)
+* Sin cache en memoria
+* Sin lógica de conteo en frontend
+
+---
+
+### Reglas para Platform UI
+
+* El frontend **NO calcula métricas**
+* El frontend **NO infiere valores**
+* Si no hay datos → mostrar “Sin datos”
+* Loading states deben reflejar fetch real
+
+---
+
+### Criterio de Validación
+
+Una métrica es válida **solo si**:
+
+1. Puede reproducirse con una query SQL
+2. Coincide con el historial real de conversaciones
+3. Cambia al enviar mensajes reales
+
 ## Lógica de Agente y Reglas de Negocio
 
 El Prompt del Sistema (`system_prompt_template`) define reglas críticas que **todo modelo debe respetar**:

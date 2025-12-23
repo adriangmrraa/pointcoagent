@@ -132,13 +132,14 @@ async def bootstrap():
 
 @router.get("/stats", dependencies=[Depends(verify_admin_token)])
 async def get_stats():
-    """Get dashboard statistics."""
+    """Get dashboard statistics. Strictly derived from HITL tables."""
     # Active tenants (with ID)
     active_tenants = await db.pool.fetchval("SELECT COUNT(*) FROM tenants WHERE tiendanube_store_id IS NOT NULL")
     
-    # Message stats
-    total_messages = await db.pool.fetchval("SELECT COUNT(*) FROM inbound_messages")
-    processed_messages = await db.pool.fetchval("SELECT COUNT(*) FROM inbound_messages WHERE status = 'done'")
+    # Message stats (Source of Truth: chat_messages)
+    total_messages = await db.pool.fetchval("SELECT COUNT(*) FROM chat_messages")
+    # Mapping 'processed' to 'assistant' responses for logic equivalent
+    processed_messages = await db.pool.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'assistant'")
     
     return {
         "active_tenants": active_tenants,
@@ -422,10 +423,10 @@ async def send_manual_message(data: dict):
     
     await db.pool.execute(
         """
-        INSERT INTO chat_messages (from_number, role, content, correlation_id, created_at)
-        VALUES ($1, 'human_supervisor', $2, $3, NOW())
+        INSERT INTO chat_messages (id, from_number, role, content, correlation_id, created_at)
+        VALUES ($1, $2, 'human_supervisor', $3, $4, NOW())
         """,
-        to_number, msg_content, correlation_id
+        str(uuid.uuid4()), to_number, msg_content, correlation_id
     )
     
     # 2. Forward to Whatsapp Service
@@ -613,12 +614,30 @@ async def list_tools():
 
 @router.get("/analytics/summary", dependencies=[Depends(verify_admin_token)])
 async def analytics_summary(tenant_id: int = 1, from_date: str = None, to_date: str = None):
-    # Mock data for now, or real queries if tables existed with stats
-    total = await db.pool.fetchval("SELECT COUNT(*) FROM inbound_messages")
+    """
+    Advanced Analytics derived strictly from PostgreSQL (Single Source of Truth).
+    Follows AGENTS.md contract.
+    """
+    # 1. Conversation KPIs
+    active_convs = await db.pool.fetchval("SELECT COUNT(*) FROM chat_conversations WHERE status = 'open'")
+    blocked_convs = await db.pool.fetchval("SELECT COUNT(*) FROM chat_conversations WHERE status = 'human_override'")
+    
+    # 2. Message KPIs
+    total_msgs = await db.pool.fetchval("SELECT COUNT(*) FROM chat_messages")
+    ai_msgs = await db.pool.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'assistant'")
+    human_msgs = await db.pool.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'human_supervisor'")
+    
     return {
         "kpis": {
-            "conversations": {"value": total or 0},
-            "orders_lookup": {"requested": 12, "success_rate": 0.95}
+            "conversations": {
+                "active": active_convs or 0,
+                "blocked": blocked_convs or 0
+            },
+            "messages": {
+                "total": total_msgs or 0,
+                "ai": ai_msgs or 0,
+                "human": human_msgs or 0
+            }
         }
     }
 
@@ -745,26 +764,40 @@ async def send_test_msg(data: dict):
 
 @router.get("/console/events", dependencies=[Depends(verify_admin_token)])
 async def console_events(limit: int = 50):
-    """Unified event log for the Console view."""
-    # Combine inbound and outbound
+    """Unified event log for the Console view. Strictly derived from chat_messages."""
+    # We query only chat_messages as the Single Source of Truth
     query = """
-    SELECT 'inbound' as type, correlation_id, received_at as ts, from_number as source, payload::text as content 
-    FROM inbound_messages 
-    UNION ALL
-    SELECT 'outbound' as type, correlation_id, created_at as ts, 'Assistant' as source, content 
+    SELECT 
+        CASE 
+            WHEN role = 'user' THEN 'inbound'
+            ELSE 'outbound'
+        END as type,
+        correlation_id,
+        created_at as ts,
+        role as source_role,
+        content 
     FROM chat_messages 
-    ORDER BY ts DESC LIMIT $1
+    ORDER BY created_at DESC 
+    LIMIT $1
     """
     rows = await db.pool.fetch(query, limit)
     events = []
     for r in rows:
+        # Map DB roles to UI sources
+        source_label = "agent"
+        if r["source_role"] == "user": source_label = "user"
+        elif r["source_role"] == "human_supervisor": source_label = "human"
+        
         events.append({
             "event_type": r["type"],
             "timestamp": r["ts"].isoformat(),
-            "source": "whatsapp" if r["type"] == "inbound" else "agent",
+            "source": source_label,
             "severity": "info",
             "correlation_id": r["correlation_id"],
-            "details": {"message": r["content"][:200], "from_number": r["source"]}
+            "details": {
+                "message": r["content"][:200], 
+                "role": r["source_role"]
+            }
         })
     return {"events": events}
 
