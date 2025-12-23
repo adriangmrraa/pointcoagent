@@ -2976,23 +2976,58 @@ async function loadChatHistory(chatId) {
 }
 
 function renderMessageBubble(msg, container) {
+    // If it's an assistant or human supervisor message, try to parse it as JSON
+    if (msg.role === 'assistant' || msg.role === 'human_supervisor') {
+        try {
+            const rawContent = msg.content || '';
+            const isJson = rawContent.trim().startsWith('{') || rawContent.trim().startsWith('[');
+
+            if (isJson) {
+                const parsed = JSON.parse(rawContent);
+                if (parsed.messages && Array.isArray(parsed.messages)) {
+                    // Render each part as a separate bubble
+                    parsed.messages.forEach(subMsg => {
+                        const virtualMsg = {
+                            ...msg,
+                            content: subMsg.text || subMsg.content || '',
+                            message_type: (subMsg.imageUrl || subMsg.image_url) ? 'image' : 'text',
+                            storage_url: subMsg.imageUrl || subMsg.image_url || msg.storage_url
+                        };
+                        createBubbleElement(virtualMsg, container);
+                    });
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to parse message JSON, showing as raw:", e);
+        }
+    }
+
+    // Default: Single bubble
+    createBubbleElement(msg, container);
+}
+
+function createBubbleElement(msg, container) {
     const div = document.createElement('div');
-    const isUser = msg.role === 'user';
-    const isHuman = msg.human_override || msg.role === 'human_supervisor';
-    const isAssistant = msg.role === 'assistant';
+    const role = msg.role;
+    const isUser = role === 'user';
+    const isHuman = msg.human_override || role === 'human_supervisor';
+    const isAssistant = role === 'assistant';
 
-    let bubbleClass = 'bot';
+    // Alignment Classes from style.css
+    // style.css uses: .message-bubble.user, .message-bubble.assistant, .message-bubble.human
+    let bubbleClass = 'assistant';
     if (isUser) bubbleClass = 'user';
-    // Human sends as "bot" typically (right side) but with different style
+    if (isHuman) bubbleClass = 'human';
 
-    div.className = `chat-bubble ${bubbleClass} ${isHuman ? 'human' : ''}`;
+    div.className = `message-bubble ${bubbleClass}`;
 
     let contentHtml = '';
     const mediaUrl = msg.storage_url || msg.preview_url;
 
     if (msg.message_type === 'image') {
         const caption = msg.content || '';
-        contentHtml = `<img src="${mediaUrl || '#'}" class="chat-media-img" loading="lazy" onclick="window.open('${mediaUrl}', '_blank')">`;
+        contentHtml = `<img src="${mediaUrl || '#'}" class="image-preview" loading="lazy" onclick="window.open('${mediaUrl}', '_blank')">`;
         if (caption) contentHtml += `<div class="caption">${caption}</div>`;
     } else if (msg.message_type === 'audio') {
         contentHtml = `<audio controls src="${mediaUrl || '#'}"></audio>`;
@@ -3005,24 +3040,24 @@ function renderMessageBubble(msg, container) {
         if (msg.content) contentHtml += `<div class="caption">${msg.content}</div>`;
     } else {
         // Text
-        contentHtml = `<p>${msg.content || ''}</p>`;
+        const text = (msg.content || '').replace(/\n/g, '<br>');
+        contentHtml = `<p>${text}</p>`;
     }
 
-    const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Status Icon
-    let statusIcon = '';
-    if (isHuman) statusIcon = '<span title="Agente Humano">👤</span>';
-    if (isAssistant) statusIcon = '<span>🤖</span>';
+    // Meta Label / Icon
+    let metaLabel = '';
+    if (isHuman) metaLabel = 'Agente Humano';
+    if (isAssistant) metaLabel = 'IA Assistant';
+    if (isUser) metaLabel = '';
 
     div.innerHTML = `
+        ${metaLabel ? `<div class="message-label">${metaLabel}</div>` : ''}
         <div class="bubble-content">
             ${contentHtml}
         </div>
-        <div class="bubble-meta">
-            <span>${time}</span>
-            ${statusIcon}
-        </div>
+        <span class="message-time">${timeStr}</span>
     `;
 
     container.appendChild(div);
