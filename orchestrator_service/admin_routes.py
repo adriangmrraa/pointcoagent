@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 from datetime import datetime, timedelta
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Header, HTTPException, Depends, Request, Response
 from pydantic import BaseModel
 import httpx
@@ -22,7 +22,7 @@ async def verify_admin_token(x_admin_token: str = Header(None)):
 from utils import encrypt_password, decrypt_password
 
 class HandoffConfigModel(BaseModel):
-    tenant_id: UUID
+    tenant_id: uuid.UUID
     enabled: bool = True
     destination_email: str
     handoff_instructions: str = ""
