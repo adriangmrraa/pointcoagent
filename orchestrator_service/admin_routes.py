@@ -72,6 +72,10 @@ async def sync_environment():
         ("OPENAI_API_KEY", "openai", "OpenAI API Key"),
         ("YCLOUD_API_KEY", "whatsapp_ycloud", "YCloud API Key"),
         ("YCLOUD_WEBHOOK_SECRET", "whatsapp_ycloud", "YCloud Webhook Secret"),
+        ("WHATSAPP_ACCESS_TOKEN", "whatsapp_meta", "Meta API Access Token"),
+        ("WHATSAPP_PHONE_NUMBER_ID", "whatsapp_meta", "Meta API Phone ID"),
+        ("WHATSAPP_BUSINESS_ACCOUNT_ID", "whatsapp_meta", "Meta API Business ID"),
+        ("WHATSAPP_VERIFY_TOKEN", "whatsapp_meta", "Meta API Verify Token"),
         ("TIENDANUBE_ACCESS_TOKEN", "tiendanube", "Tienda Nube Token (Global)"),
         ("INTERNAL_API_TOKEN", "security", "Internal Service Token")
     ]
@@ -224,9 +228,16 @@ async def delete_all_tenants():
     await db.pool.execute("DELETE FROM tenants")
     return {"status": "ok"}
 
-@router.delete("/tenants/{phone}", dependencies=[Depends(verify_admin_token)])
-async def delete_tenant(phone: str):
-    await db.pool.execute("DELETE FROM tenants WHERE bot_phone_number = $1", phone)
+@router.delete("/tenants/{identifier}", dependencies=[Depends(verify_admin_token)])
+async def delete_tenant(identifier: str):
+    import re
+    if identifier.isdigit():
+        # Delete by numeric ID
+        await db.pool.execute("DELETE FROM tenants WHERE id = $1", int(identifier))
+    else:
+        # Handle phone number (raw and cleaned)
+        clean_phone = re.sub(r'[^0-9]', '', identifier)
+        await db.pool.execute("DELETE FROM tenants WHERE bot_phone_number = $1 OR bot_phone_number = $2", identifier, clean_phone)
     return {"status": "ok"}
 
 @router.get("/tenants/{id}/details", dependencies=[Depends(verify_admin_token)])
@@ -287,9 +298,40 @@ async def get_credential(id: int):
 
 @router.post("/credentials", dependencies=[Depends(verify_admin_token)])
 async def create_credential(cred: CredentialModel):
-    q = """INSERT INTO credentials (name, value, category, scope, tenant_id, description) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id"""
-    row = await db.pool.fetchrow(q, cred.name, cred.value, cred.category, cred.scope, cred.tenant_id, cred.description)
-    return {"status": "ok", "id": row['id']}
+    tenant_id = cred.tenant_id if cred.scope == "tenant" else None
+    
+    q_upsert = """
+    INSERT INTO credentials (name, value, category, scope, tenant_id, description, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    ON CONFLICT (name, scope) 
+    DO UPDATE SET 
+        value = EXCLUDED.value,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        tenant_id = EXCLUDED.tenant_id,
+        updated_at = NOW()
+    RETURNING id
+    """
+    row = await db.pool.fetchrow(q_upsert, cred.name, cred.value, cred.category, cred.scope, tenant_id, cred.description)
+    return {"status": "ok", "id": row['id'], "action": "upserted"}
+
+# --- Internal Endpoints (for inter-service use) ---
+
+@router.get("/internal/credentials/{name}")
+async def get_internal_credential(name: str, x_internal_token: str = Header(None)):
+    if x_internal_token != os.getenv("INTERNAL_API_TOKEN", "internal-secret"):
+         raise HTTPException(status_code=401, detail="Unauthorized internal call")
+    
+    # 1. Check DB
+    val = await db.pool.fetchval("SELECT value FROM credentials WHERE name = $1 LIMIT 1", name)
+    # 2. Check ENV if not in DB
+    if not val:
+        val = os.getenv(name)
+        
+    if not val:
+        raise HTTPException(status_code=404, detail="Credential not found")
+        
+    return {"name": name, "value": val}
 
 @router.delete("/credentials/{id}", dependencies=[Depends(verify_admin_token)])
 async def delete_credential(id: int):
@@ -359,28 +401,54 @@ async def save_setup_state(data: dict):
 
 @router.get("/diagnostics/openai/test", dependencies=[Depends(verify_admin_token)])
 async def test_openai():
+    # 1. Check ENV
     key = os.getenv("OPENAI_API_KEY")
-    if key and key.startswith("sk-"):
-        return {"status": "OK", "message": "API Key configured properly"}
+    # 2. Check DB if not in ENV
+    if not key or not key.startswith("sk-"):
+        key_db = await db.pool.fetchval("SELECT value FROM credentials WHERE name = 'OPENAI_API_KEY'")
+        if key_db:
+             key = key_db
+
+    if key and (key.startswith("sk-") or len(key) > 20):
+        return {"status": "OK", "message": "OpenAI configured (ENV or DB)"}
     return {"status": "FAIL", "message": "Missing or invalid OPENAI_API_KEY"}
 
 @router.get("/diagnostics/ycloud/test", dependencies=[Depends(verify_admin_token)])
 async def test_ycloud():
+    # 1. Check ENV
     key = os.getenv("YCLOUD_API_KEY")
+    # 2. Check DB
+    if not key:
+        key_db = await db.pool.fetchval("SELECT value FROM credentials WHERE name = 'YCLOUD_API_KEY'")
+        if key_db:
+            key = key_db
+
     if key:
-        return {"status": "OK", "message": "YCloud configured"}
+        return {"status": "OK", "message": "YCloud configured (ENV or DB)"}
     return {"status": "FAIL", "message": "Missing YCLOUD_API_KEY"}
 
 @router.get("/diagnostics/healthz", dependencies=[Depends(verify_admin_token)])
 async def healthz():
-    # Perform real checks if possible, for now assume healthy as service is up
+    # Check Database
+    try:
+        await db.pool.execute("SELECT 1")
+        db_status = "OK"
+    except:
+        db_status = "ERROR"
+
+    # Check OpenAI
+    openai_res = await test_openai()
+    
+    # Check YCloud
+    ycloud_res = await test_ycloud()
+
     return {
         "status": "OK",
         "checks": [
             {"name": "orchestrator", "status": "OK", "details": "Service Running"},
-            {"name": "whatsapp_service", "status": "OK", "details": "Connected"}, # Mock for now
-            {"name": "database", "status": "OK", "details": "Connected"},
-            {"name": "redis", "status": "OK", "details": "Connected"}
+            {"name": "database", "status": db_status, "details": "Connected" if db_status == "OK" else "Failed"},
+            {"name": "openai", "status": openai_res["status"], "details": openai_res["message"]},
+            {"name": "ycloud", "status": ycloud_res["status"], "details": ycloud_res["message"]}
         ]
     }
 

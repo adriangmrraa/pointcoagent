@@ -179,8 +179,18 @@ async def lifespan(app: FastAPI):
             scope TEXT DEFAULT 'global',
             tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
             description TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW()
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(name, scope)
         );
+        
+        -- Add updated_at if it doesn't exist (incremental fix)
+        DO $$ 
+        BEGIN 
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='credentials' AND column_name='updated_at') THEN
+                ALTER TABLE credentials ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+            END IF;
+        END $$;
         
         -- 003_advanced_features.sql
         ALTER TABLE tenants ADD COLUMN IF NOT EXISTS total_tokens_used BIGINT DEFAULT 0;

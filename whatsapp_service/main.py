@@ -20,15 +20,45 @@ from ycloud_client import YCloudClient
 # Initialize config
 load_dotenv()
 
+# Config handling
+_config_cache = {}
+
+async def get_config(name: str, default: str = None) -> str:
+    # 1. Check local cache
+    if name in _config_cache:
+        return _config_cache[name]
+    
+    # 2. Check local Environment
+    val = os.getenv(name)
+    if val:
+        _config_cache[name] = val
+        return val
+        
+    # 3. Query Orchestrator
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{ORCHESTRATOR_URL}/admin/internal/credentials/{name}",
+                headers={"X-Internal-Token": INTERNAL_API_TOKEN or "internal-secret"},
+                timeout=5.0
+            )
+            if resp.status_code == 200:
+                val = resp.json().get("value")
+                if val:
+                    _config_cache[name] = val
+                    return val
+    except Exception as e:
+        logger.warning("config_fetch_failed", name=name, error=str(e))
+        
+    return default
+
+# Initialize startup values (can be overridden later)
 YCLOUD_API_KEY = os.getenv("YCLOUD_API_KEY")
 YCLOUD_WEBHOOK_SECRET = os.getenv("YCLOUD_WEBHOOK_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN") or "internal-secret"
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator_service:8000")
-
-if not YCLOUD_WEBHOOK_SECRET:
-    raise ValueError("YCLOUD_WEBHOOK_SECRET is required")
 
 # Initialize structlog
 structlog.configure(
@@ -128,7 +158,8 @@ async def transcribe_audio(audio_url: str, correlation_id: str) -> Optional[str]
             
             # 2. Transcribe with Whisper
             files = {"file": ("audio.ogg", audio_data, "audio/ogg")}
-            headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+            v_openai = await get_config("OPENAI_API_KEY", OPENAI_API_KEY)
+            headers = {"Authorization": f"Bearer {v_openai}"}
             data = {"model": "whisper-1"}
             
             trans_res = await client.post(
@@ -144,7 +175,8 @@ async def transcribe_audio(audio_url: str, correlation_id: str) -> Optional[str]
         return None
 
 async def send_sequence(messages: List[OrchestratorMessage], user_number: str, business_number: str, inbound_id: str, correlation_id: str):
-    client = YCloudClient(YCLOUD_API_KEY, business_number)
+    v_ycloud = await get_config("YCLOUD_API_KEY", YCLOUD_API_KEY)
+    client = YCloudClient(v_ycloud, business_number)
     
     try: 
         await client.mark_as_read(inbound_id, correlation_id)

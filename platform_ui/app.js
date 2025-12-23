@@ -645,17 +645,22 @@ function editTenant(botPhoneNumber) {
     });
 }
 
-async function deleteTenant() {
-    if (!editingTenant) return;
-    if (!confirm('¿Estás seguro de que quieres eliminar esta tienda?')) return;
+async function deleteTenant(phoneNumber) {
+    const idToDelete = phoneNumber || editingTenant;
+    if (!idToDelete) return;
+
+    if (!confirm(`¿Estás seguro de que quieres eliminar esta tienda? Esta acción no se puede deshacer.`)) return;
 
     try {
-        const res = await adminFetch(`/admin/tenants/${editingTenant}`, 'DELETE');
+        const res = await adminFetch(`/admin/tenants/${encodeURIComponent(idToDelete)}`, 'DELETE');
         if (res && res.status === 'ok') {
             showNotification(true, 'Tienda Eliminada', 'La tienda se eliminó correctamente.');
             closeModal('tenant-modal');
             loadTenants();
-            updateStats();
+            if (typeof updateStats === 'function') updateStats();
+
+            // Call step reset if it exists
+            if (typeof checkAndResetStep3 === 'function') checkAndResetStep3();
         } else {
             showNotification(false, 'Error', 'No se pudo eliminar la tienda.');
         }
@@ -967,13 +972,26 @@ document.getElementById('ycloud-form').addEventListener('submit', async (e) => {
     const data = Object.fromEntries(formData.entries());
 
     try {
-        const res = await adminFetch('/admin/ycloud', 'POST', data);
-        if (res && res.status === 'ok') {
-            showNotification(true, 'YCloud Configurado', 'La configuración de WhatsApp (YCloud) se guardó correctamente.');
-            closeModal('ycloud-config-modal');
-        } else {
-            showNotification(false, 'Error', 'No se pudo guardar la configuración de YCloud.');
-        }
+        // Save both keys to credentials table
+        await adminFetch('/admin/credentials', 'POST', {
+            name: "YCLOUD_API_KEY",
+            value: data.api_key || data.YCLOUD_API_KEY,
+            category: "whatsapp_ycloud",
+            scope: "global",
+            description: "YCloud API Key for WhatsApp"
+        });
+
+        await adminFetch('/admin/credentials', 'POST', {
+            name: "YCLOUD_WEBHOOK_SECRET",
+            value: data.webhook_secret || data.YCLOUD_WEBHOOK_SECRET,
+            category: "whatsapp_ycloud",
+            scope: "global",
+            description: "YCloud Webhook Secret"
+        });
+
+        showNotification(true, 'YCloud Configurado', 'La configuración de WhatsApp (YCloud) se guardó correctamente.');
+        closeModal('ycloud-config-modal');
+        if (typeof loadCredentials === 'function') loadCredentials();
     } catch (error) {
         showNotification(false, 'Error de Conexión', `Error: ${error.message}`);
     } finally {
@@ -1155,6 +1173,20 @@ function updateChecklist(bootstrap) {
     if (bootstrap.configured_services && bootstrap.configured_services.includes('openai')) {
         openaiCheck.querySelector('.check-status').textContent = '✅';
         openaiCheck.style.color = 'var(--success)';
+    }
+
+    // WhatsApp YCloud check
+    const ycloudCheck = document.getElementById('check-ycloud');
+    if (ycloudCheck && bootstrap.configured_services && bootstrap.configured_services.includes('whatsapp_ycloud')) {
+        ycloudCheck.querySelector('.check-status').textContent = '✅';
+        ycloudCheck.style.color = 'var(--success)';
+    }
+
+    // WhatsApp Meta check
+    const metaCheck = document.getElementById('check-meta');
+    if (metaCheck && bootstrap.configured_services && bootstrap.configured_services.includes('whatsapp_meta')) {
+        metaCheck.querySelector('.check-status').textContent = '✅';
+        metaCheck.style.color = 'var(--success)';
     }
 }
 
@@ -1696,26 +1728,7 @@ async function editTenant(phoneNumber) {
     }
 }
 
-async function deleteTenant(phoneNumber) {
-    if (confirm(`¿Estás seguro de que quieres eliminar la tienda con número ${phoneNumber}? Esta acción no se puede deshacer.`)) {
-        try {
-            const result = await adminFetch(`/admin/tenants/${phoneNumber}`, 'DELETE');
-            if (result && result.status === 'ok') {
-                showNotification(true, 'Tienda Eliminada', 'La tienda se eliminó correctamente');
-                loadTenants();
-                updateStats();
-                closeModal('tenant-modal');
-
-                // Check if step 3 should be reset
-                checkAndResetStep3();
-            } else {
-                showNotification(false, 'Error', 'No se pudo eliminar la tienda');
-            }
-        } catch (error) {
-            showNotification(false, 'Error', 'Error al eliminar la tienda');
-        }
-    }
-}
+// Consolidated deleteTenant above at line 648
 
 async function testTenantConnection(botPhoneNumber) {
     if (!botPhoneNumber) return;
@@ -1868,22 +1881,31 @@ document.getElementById('whatsapp-meta-form').addEventListener('submit', async (
         await adminFetch('/admin/credentials', 'POST', {
             name: "WHATSAPP_ACCESS_TOKEN",
             value: data.access_token,
-            scope: "global"
+            category: "whatsapp_meta",
+            scope: "global",
+            description: "Meta API Access Token"
         });
         await adminFetch('/admin/credentials', 'POST', {
             name: "WHATSAPP_PHONE_NUMBER_ID",
             value: data.phone_number_id,
-            scope: "global"
+            category: "whatsapp_meta",
+            scope: "global",
+            description: "Meta API Phone Number ID"
         });
         await adminFetch('/admin/credentials', 'POST', {
             name: "WHATSAPP_BUSINESS_ACCOUNT_ID",
             value: data.business_account_id,
-            scope: "global"
+            category: "whatsapp_meta",
+            scope: "global",
+            description: "Meta API Business Account ID"
         });
+
         await adminFetch('/admin/credentials', 'POST', {
             name: "WHATSAPP_VERIFY_TOKEN",
             value: data.verify_token,
-            scope: "global"
+            category: "whatsapp_meta",
+            scope: "global",
+            description: "Webhook Verify Token"
         });
 
         showNotification(true, 'WhatsApp Meta API Configurado', 'Las credenciales de WhatsApp Meta API se guardaron correctamente.');
