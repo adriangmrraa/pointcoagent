@@ -395,16 +395,34 @@ async def upsert_handoff_config(config: HandoffConfigModel):
         )
 
     # Mirror to 'credentials' table for visibility in UI
-    await db.pool.execute(
-        """
-        INSERT INTO credentials (name, value, category, scope, tenant_id, description, updated_at)
-        VALUES ($1, $2, 'smtp_handoff', 'tenant', $3, $4, NOW())
-        ON CONFLICT (name, tenant_id) DO UPDATE SET
-            value = EXCLUDED.value,
-            updated_at = NOW()
-        """,
-        "HANDOFF_SMTP_PASSWORD", password_to_store, config.tenant_id, f"SMTP Password for {config.smtp_username}"
+    # Manual Upsert to replace: ON CONFLICT (name, tenant_id)
+    cred_name = "HANDOFF_SMTP_PASSWORD"
+    cred_desc = f"SMTP Password for {config.smtp_username}"
+    
+    existing_cred = await db.pool.fetchrow(
+        "SELECT id FROM credentials WHERE name = $1 AND tenant_id = $2", 
+        cred_name, config.tenant_id
     )
+    
+    if existing_cred:
+        await db.pool.execute(
+            """
+            UPDATE credentials SET 
+                value = $1, 
+                description = $2, 
+                updated_at = NOW() 
+            WHERE id = $3
+            """,
+            password_to_store, cred_desc, existing_cred['id']
+        )
+    else:
+        await db.pool.execute(
+            """
+            INSERT INTO credentials (name, value, category, scope, tenant_id, description, updated_at)
+            VALUES ($1, $2, 'smtp_handoff', 'tenant', $3, $4, NOW())
+            """,
+            cred_name, password_to_store, config.tenant_id, cred_desc
+        )
 
     return {"status": "ok"}
 
