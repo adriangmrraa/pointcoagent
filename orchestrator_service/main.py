@@ -753,6 +753,12 @@ async def derivhumano(reason: str, contact_name: Optional[str] = None, contact_p
 
     # 2. Build Email Content based on email_context flags
     ctx = config['email_context'] or {}
+    if isinstance(ctx, str):
+        try:
+            ctx = json.loads(ctx)
+        except:
+            ctx = {}
+            
     wa_id = (cphone or contact_phone) if ctx.get('ctx-phone') else "Oculto"
     user_name = (contact_name or 'No especificado') if ctx.get('ctx-name') else "Oculto"
     wa_link = f"https://wa.me/{wa_id}" if wa_id != "Oculto" else "No disponible"
