@@ -411,7 +411,12 @@ app = FastAPI(
 # This MUST be the first middleware added
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex="https?://.*",
+    # Explicitly list the frontend origin
+    allow_origins=[
+        "https://docker-platform-ui.yn8wow.easypanel.host", 
+        "http://localhost:3000",
+        "http://localhost:8000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -942,6 +947,11 @@ CONOCIMIENTO DE TIENDA:
     # 4. POLÍTICA DE DERIVACIÓN A HUMANO (HI-PRIORITY)
     if tenant and tenant.get('handoff_enabled'):
         policy = tenant.get('handoff_policy') or {}
+        if isinstance(policy, str):
+            try:
+                policy = json.loads(policy)
+            except:
+                policy = {}
         handoff_rules = tenant.get('handoff_instructions') or ""
         
         # Build rules string from checkboxes

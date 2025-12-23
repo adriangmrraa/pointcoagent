@@ -141,7 +141,11 @@ async function adminFetch(endpoint, method = 'GET', body = null, tenantId = null
         headers['x-signature'] = `t=${timestamp},s=dummy_signature`;
     }
 
-    const options = { method, headers };
+    const options = {
+        method,
+        headers,
+        credentials: 'include', // Ensure cookies/headers are sent for CORS
+    };
     if (body) options.body = JSON.stringify(body);
 
     console.log(`🔗 API Call: ${method} ${API_BASE}${endpoint}`); // Debug log
