@@ -209,32 +209,32 @@ async def list_chats():
         rows = await db.pool.fetch(query)
     
         results = []
-    now = datetime.now().astimezone()
-    
-    for r in rows:
-        # Determine strict status based on lockout time
-        status = r['status']
-        lockout = r['human_override_until']
-        is_locked = False
-        if lockout and lockout > now:
-            is_locked = True
-            status = 'human_override'
-            
-        results.append({
-            "id": str(r['id']),
-            "tenant_id": r['tenant_id'],
-            "channel": r['channel'],
-            "external_user_id": r['external_user_id'],
-            "display_name": r['display_name'] or r['external_user_id'],
-            "avatar_url": r['avatar_url'],
-            "status": status,
-            "is_locked": is_locked,
-            "human_override_until": lockout.isoformat() if lockout else None,
-            "last_message_at": r['last_message_at'].isoformat() if r['last_message_at'] else None,
-            "last_message_preview": r['last_message_preview']
-        })
-    return results
-    """
+        now = datetime.now().astimezone()
+        
+        for r in rows:
+            # Determine strict status based on lockout time
+            status = r['status']
+            lockout = r['human_override_until']
+            is_locked = False
+            if lockout and lockout > now:
+                is_locked = True
+                status = 'human_override'
+                
+            results.append({
+                "id": str(r['id']),
+                "tenant_id": r['tenant_id'],
+                "channel": r['channel'],
+                "external_user_id": r['external_user_id'],
+                "display_name": r['display_name'] or r['external_user_id'],
+                "avatar_url": r['avatar_url'],
+                "status": status,
+                "is_locked": is_locked,
+                "human_override_until": lockout.isoformat() if lockout else None,
+                "last_message_at": r['last_message_at'].isoformat() if r['last_message_at'] else None,
+                "last_message_preview": r['last_message_preview']
+            })
+        return results
+
     except Exception as e:
         print(f"ERROR list_chats: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to list chats: {str(e)}")
