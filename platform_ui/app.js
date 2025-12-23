@@ -473,8 +473,17 @@ async function loadTools() {
 }
 
 function configureTool(name) {
+    if (name === 'derivhumano') {
+        const section = document.querySelector('.handoff-config-section');
+        if (section) {
+            section.scrollIntoView({ behavior: 'smooth' });
+            // Highlight the section briefly
+            section.style.backgroundColor = 'rgba(255, 255, 0, 0.1)';
+            setTimeout(() => section.style.backgroundColor = '', 2000);
+            return;
+        }
+    }
     // Current tools are hardcoded in backend, so we just show an info for now
-    // or open the modal if we had tool data
     openModal('tool-modal');
     // Pre-fill name if editing
     const form = document.getElementById('tool-form');

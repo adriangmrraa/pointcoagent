@@ -374,6 +374,19 @@ async def upsert_handoff_config(config: HandoffConfigModel):
         config.smtp_username, password_to_store, 
         json.dumps(config.triggers), json.dumps(config.email_context)
     )
+
+    # Mirror to 'credentials' table for visibility in UI
+    await db.pool.execute(
+        """
+        INSERT INTO credentials (name, value, category, scope, tenant_id, description, updated_at)
+        VALUES ($1, $2, 'smtp_handoff', 'tenant', $3, $4, NOW())
+        ON CONFLICT (name, tenant_id) DO UPDATE SET
+            value = EXCLUDED.value,
+            updated_at = NOW()
+        """,
+        "HANDOFF_SMTP_PASSWORD", password_to_store, config.tenant_id, f"SMTP Password for {config.smtp_username}"
+    )
+
     return {"status": "ok"}
 
 @router.get("/tenants", dependencies=[Depends(verify_admin_token)])
@@ -731,7 +744,8 @@ async def list_tools():
     return [
         {"name": "products_search", "type": "function", "service_url": "internal"},
         {"name": "order_lookup", "type": "tiendanube", "service_url": "api.tiendanube.com"},
-        {"name": "coupon_validate", "type": "mcp", "service_url": "n8n-bridge"}
+        {"name": "coupon_validate", "type": "mcp", "service_url": "n8n-bridge"},
+        {"name": "derivhumano", "type": "internal", "service_url": "orchestrator"}
     ]
 
 # --- Analytics / Telemetry ---
