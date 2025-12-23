@@ -9,8 +9,13 @@ import structlog
 from typing import Any, Dict, List, Optional, Union, Literal
 from fastapi import FastAPI, HTTPException, Header, Depends, status, Request
 from fastapi.responses import JSONResponse, Response
+from contextvars import ContextVar
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
+# --- Dynamic Context ---
+tenant_store_id: ContextVar[Optional[str]] = ContextVar("tenant_store_id", default=None)
+tenant_access_token: ContextVar[Optional[str]] = ContextVar("tenant_access_token", default=None)
 
 # Initialize earlys
 load_dotenv()
@@ -34,9 +39,6 @@ from db import db
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
-TIENDANUBE_TOKEN = "ddfd19400d3236fd4524fff6f0689c5c6748806f"
-TIENDANUBE_STORE_ID = "6873259"
-TIENDANUBE_API_BASE = f"https://api.tiendanube.com/v1/{TIENDANUBE_STORE_ID}"
 
 if not OPENAI_API_KEY:
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -97,6 +99,7 @@ class InboundChatEvent(BaseModel):
     event_id: str
     provider_message_id: str
     from_number: str
+    to_number: Optional[str] = None
     text: str
     customer_name: Optional[str] = None
     event_type: str
@@ -373,13 +376,21 @@ def simplify_product(p):
     }
 
 def call_tiendanube_api(endpoint: str, params: dict = None):
+    # Retrieve current tenant credentials from ContextVar
+    store_id = tenant_store_id.get()
+    token = tenant_access_token.get()
+
+    if not store_id or not token:
+        logger.error("tiendanube_config_missing", store_id=store_id, has_token=bool(token))
+        return "Error: Store ID or Token not configured for this tenant."
+
     headers = {
-        "Authentication": f"bearer {TIENDANUBE_TOKEN}",
+        "Authentication": f"bearer {token}",
         "User-Agent": "n8n (santiago@atendo.agency)",
         "Content-Type": "application/json"
     }
     try:
-        url = f"{TIENDANUBE_API_BASE}{endpoint}"
+        url = f"https://api.tiendanube.com/v1/{store_id}{endpoint}"
         response = requests.get(url, params=params, headers=headers, timeout=10)
         if response.status_code != 200:
             return f"Error HTTP {response.status_code}: {response.text}"
@@ -464,9 +475,14 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
     """
     # 1. Fetch Tenant Context
     tenant = await db.pool.fetchrow(
-        "SELECT system_prompt_template, store_catalog_knowledge FROM tenants WHERE bot_phone_number = $1", 
+        "SELECT system_prompt_template, store_catalog_knowledge, tiendanube_store_id, tiendanube_access_token FROM tenants WHERE bot_phone_number = $1", 
         tenant_phone
     )
+
+    # Set context variables for this execution
+    if tenant:
+        tenant_store_id.set(tenant['tiendanube_store_id'])
+        tenant_access_token.set(tenant['tiendanube_access_token'])
     
     # Default Prompt if DB is empty or tenant not found
     sys_template = ""
@@ -589,7 +605,9 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     )
     
     # --- Dynamic Agent Loading ---
-    executor = await get_agent_executable(tenant_phone=event.from_number)
+    # Use to_number (business) if provided, fallback to from_number (testing)
+    tenant_lookup = event.to_number or event.from_number
+    executor = await get_agent_executable(tenant_phone=tenant_lookup)
     
     # Store User Message
     correlation_id = str(uuid.uuid4())

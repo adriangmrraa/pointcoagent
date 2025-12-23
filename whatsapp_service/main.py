@@ -207,7 +207,7 @@ async def process_user_buffer(from_number: str, business_number: str, customer_n
         
         inbound_event = {
             "provider": "ycloud", "event_id": event_id, "provider_message_id": provider_message_id,
-            "from_number": from_number, "text": joined_text, "customer_name": customer_name,
+            "from_number": from_number, "to_number": business_number, "text": joined_text, "customer_name": customer_name,
             "event_type": "whatsapp.inbound_message.received", "correlation_id": correlation_id
         }
         headers = {"X-Correlation-Id": correlation_id}
