@@ -411,8 +411,8 @@ app = FastAPI(
 # This MUST be the first middleware added
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origin_regex="https?://.*",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1142,12 +1142,32 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
 
     # --- 2. Handle Echoes (Human Messages from App) ---
     is_echo = False
-    # Check extra fields in event or implicit type
-    # For now, InboundChatEvent might need extending or we check payload properties if passed loosely
-    # User's spec said: "whatsapp.smb.message.echoes = true" in webhook
-    # The 'whatsapp_service' needs to pass this flag. 
-    # Let's assume 'event_type' == 'whatsapp.message.echo' or implicit flag in extra fields?
-    # User plan: "Handle Echo events: Insert human message, set human_override_until (+24h), abort AI."
+    if event.event_type in ["whatsapp.message.echo", "whatsapp.smb.message.echoes", "message_echo"]:
+         is_echo = True
+    
+    if is_echo:
+         logger.info("human_echo_received", from_number=event.from_number, text_preview=event.text[:50] if event.text else "Media")
+         
+         # 1. Update Chat Conversation Lockout
+         if conv_id:
+             await db.pool.execute("""
+                 UPDATE chat_conversations 
+                 SET human_override_until = NOW() + INTERVAL '24 hours',
+                     status = 'human_handling'
+                 WHERE id = $1
+             """, conv_id)
+             
+             # 2. Log message to history (marked as assistant/human_echo to show in UI but not trigger AI)
+             # We use 'assistant' role so it appears on the right side (or 'system'?)
+             # User wants to know "human handled". 
+             # Let's use 'assistant' but maybe add metadata? For now standard 'assistant'.
+             if event.text:
+                 await db.pool.execute("""
+                     INSERT INTO chat_messages (id, conversation_id, role, content, created_at)
+                     VALUES ($1, $2, 'assistant', $3, NOW())
+                 """, str(uuid.uuid4()), conv_id, event.text)
+
+         return OrchestratorResult(status="ok", send=False, text="Echo processed, AI paused.")
     # We will assume if event_type is 'echo' or similar custom logic.
     if event.event_type == "whatsapp.message.echo": 
         is_echo = True
