@@ -245,24 +245,47 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
             """,
-            # 9b. Chat Messages Repair (Comprehensive Repair to avoid missing columns)
+            # 9b. Chat Messages Repair (Comprehensive Repair to avoid missing columns and fix legacy ID type)
             """
             DO $$
             BEGIN
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS tenant_id INTEGER;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS conversation_id UUID;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS role VARCHAR(32);
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'text';
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS content TEXT;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_id UUID;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS human_override BOOLEAN DEFAULT false;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_by_user_id TEXT;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_from VARCHAR(64);
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_context VARCHAR(64);
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS ycloud_message_id VARCHAR(128);
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS provider_status VARCHAR(32);
+                -- If ID is integer (legacy), we must drop it and recreate correctly
+                IF (SELECT data_type FROM information_schema.columns WHERE table_name = 'chat_messages' AND column_name = 'id') != 'uuid' THEN
+                    DROP TABLE IF EXISTS chat_messages CASCADE;
+                END IF;
+            EXCEPTION WHEN OTHERS THEN
+                RAISE NOTICE 'Could not check/drop chat_messages';
+            END $$;
+            """,
+            # Re-create if dropped (Duplicate of step 9 basically, but safe)
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id UUID PRIMARY KEY,
+                tenant_id INTEGER, 
+                conversation_id UUID NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+                role VARCHAR(32) NOT NULL,
+                message_type VARCHAR(32) NOT NULL DEFAULT 'text',
+                content TEXT,
+                media_id UUID REFERENCES chat_media(id),
+                human_override BOOLEAN NOT NULL DEFAULT false,
+                sent_by_user_id TEXT, 
+                sent_from VARCHAR(64),
+                sent_context VARCHAR(64),
+                ycloud_message_id VARCHAR(128),
+                provider_status VARCHAR(32),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                correlation_id TEXT,
+                from_number VARCHAR(128)
+            );
+            """,
+            # Ensure columns in case table existed but was missing those
+            """
+            DO $$
+            BEGIN
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS correlation_id TEXT;
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS from_number VARCHAR(128);
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'text';
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_id UUID;
             EXCEPTION WHEN OTHERS THEN
                 RAISE NOTICE 'Schema repair failed for chat_messages';
             END $$;
@@ -1019,7 +1042,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'user', $3,
             $4, NOW(), $5, $6, $7
         )
-    """, str(uuid.uuid4()), conv_id, content, correlation_id, message_type, media_id, event.from_number)
+    """, uuid.uuid4(), conv_id, content, correlation_id, message_type, media_id, event.from_number)
     
     # Update Conversation Metadata
     preview_text = content[:50] if content else f"[{message_type}]"
@@ -1182,7 +1205,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             ) VALUES (
                 $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'assistant', $3, $4, NOW(), $5
             )
-        """, str(uuid.uuid4()), conv_id, raw_output_str, correlation_id, event.from_number)
+        """, uuid.uuid4(), conv_id, raw_output_str, correlation_id, event.from_number)
         
         # Track Usage
         await db.pool.execute("UPDATE tenants SET total_tool_calls = total_tool_calls + 1 WHERE bot_phone_number = $1", event.from_number)
