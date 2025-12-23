@@ -354,17 +354,22 @@ def simplify_product(p):
     if not isinstance(p, dict): return p
     
     # Simplify variants to just a summary of options if needed, or specific prices
-    # For now, just taking the main price and promotional price
     price = p.get("variants", [{}])[0].get("price", "0")
     promo_price = p.get("variants", [{}])[0].get("promotional_price", None)
     
+    # Extract first image URL
+    image_url = None
+    images = p.get("images", [])
+    if images and isinstance(images, list) and len(images) > 0:
+        image_url = images[0].get("src")
+
     return {
         "id": p.get("id"),
         "name": p.get("name", {}).get("es", "Sin nombre"),
         "price": price,
         "promotional_price": promo_price,
         "url": p.get("canonical_url"),
-        # "description": p.get("description", {}).get("es", "")[:200] + "..." # Truncate description
+        "imageUrl": image_url
     }
 
 def call_tiendanube_api(endpoint: str, params: dict = None):
@@ -473,12 +478,20 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
     else:
         # Fallback Hardcoded (Pointe Coach default)
         sys_template = """Eres el asistente virtual de Pointe Coach.
-PRIORIDADES:
-1. SALIDA: JSON.
-2. VERACIDAD: Usa tools.
-3. DIVISION: max 350 chars.
-GATE ABSOLUTO: Usa productsq si preguntan por productos.
-LINK WEB: https://www.pointecoach.shop/
+REGLAS CRÍTICAS DE RESPUESTA:
+1. SALIDA: Responde SIEMPRE con el formato JSON de OrchestratorResponse (una lista de objetos "messages").
+2. NUNCA envíes un objeto JSON crudo como respuesta final (ej: {"zapatillas": [...]}). Traduce todo a mensajes amigables.
+3. SECUENCIA DE BURBUJAS (8 pasos para productos):
+   - Burbuja 1: Introducción amigable (ej: "Te muestro opciones de bolsos disponibles...").
+   - Burbuja 2: SOLO la imageUrl del producto 1.
+   - Burbuja 3: Nombre, precio, variante/stock y LINK a la web del producto 1.
+   - Burbuja 4: SOLO la imageUrl del producto 2.
+   - Burbuja 5: Descripción y link del producto 2.
+   - Burbuja 6: SOLO la imageUrl del producto 3 (si hay).
+   - Burbuja 7: Descripción y link del producto 3 (si hay).
+   - Burbuja 8: CTA Final con link a la web general (https://www.pointecoach.shop) o invitación a Fitting si son puntas.
+4. FITTING: Si el usuario pregunta por "zapatillas de punta" por primera vez, recomienda SIEMPRE un fitting en la Burbuja 8.
+5. NO inventes enlaces. Usa los devueltos por las tools.
 """
 
     # Inject variables if they exist in the template string (simple replacement)
