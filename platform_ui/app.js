@@ -1472,7 +1472,7 @@ async function testCurrentStep() {
 
 async function testTiendaNube() {
     // First check if there are any stores to test
-    const stores = await adminFetch('/setup/tiendanube/stores');
+    const stores = await adminFetch('/admin/setup/tiendanube/stores');
     if (!stores || stores.stores.length === 0) {
         // No stores available, prompt to create one
         if (confirm('No tienes tiendas Tienda Nube configuradas. ¿Quieres crear una ahora?')) {
@@ -1497,12 +1497,12 @@ async function testTiendaNube() {
     showTestResult('tn-test-result', 'Probando conexión...', false);
 
     try {
-        const response = await adminFetch(`/setup/tiendanube/stores/${selectedValue}/test`, 'POST');
+        const response = await adminFetch(`/admin/setup/tiendanube/stores/${selectedValue}/test`, 'POST');
 
         if (response && response.status === 'OK') {
             showTestResult('tn-test-result', `✓ Conexión exitosa - ${response.store_name}`, false);
             // Mark as active and update step
-            await adminFetch(`/setup/tiendanube/stores/${selectedValue}/activate`, 'POST');
+            await adminFetch(`/admin/setup/tiendanube/stores/${selectedValue}/activate`, 'POST');
             // Update UI status
             const option = select.querySelector(`option[value="${selectedValue}"]`);
             if (option) {
@@ -1905,7 +1905,7 @@ async function startSetupWizard() {
             webhook_base_url: `${window.location.origin}/webhook`
         };
 
-        const sessionResult = await adminFetch('/setup/session', 'POST', sessionData);
+        const sessionResult = await adminFetch('/admin/setup/session', 'POST', sessionData);
         if (sessionResult.status === 'ok') {
             setupSessionId = sessionResult.session_id;
             currentSetupSession = sessionResult;
@@ -1940,7 +1940,7 @@ async function runPreflightStep() {
         `;
 
         // Run preflight checks
-        const preflightResult = await adminFetch('/setup/preflight', 'POST', { session_id: setupSessionId });
+        const preflightResult = await adminFetch('/admin/setup/preflight', 'POST', { session_id: setupSessionId });
 
         if (preflightResult.overall_status === 'OK') {
             // All checks passed - show success and continue
@@ -2095,7 +2095,7 @@ function getServiceName(service) {
 
 async function saveSetupProgress() {
     try {
-        await adminFetch('/setup/state', 'POST', {
+        await adminFetch('/admin/setup/state', 'POST', {
             currentStep,
             stepStatuses
         });
@@ -2152,7 +2152,7 @@ async function runStepTest(stepNumber) {
         switch (stepNumber) {
             case 1:
                 // Check OpenAI configuration
-                result = await adminFetch('/diagnostics/openai/test');
+                result = await adminFetch('/admin/diagnostics/openai/test');
                 if (result && result.status === 'OK') {
                     stepStatuses[1] = 'ok';
                     showNotification(true, 'Paso 1 Completado', 'OpenAI configurado correctamente.');
@@ -2164,7 +2164,7 @@ async function runStepTest(stepNumber) {
 
             case 2:
                 // Check YCloud configuration
-                result = await adminFetch('/diagnostics/ycloud/test');
+                result = await adminFetch('/admin/diagnostics/ycloud/test');
                 if (result && result.status === 'OK') {
                     stepStatuses[2] = 'ok';
                     showNotification(true, 'Paso 2 Completado', 'YCloud configurado correctamente.');
@@ -2188,7 +2188,7 @@ async function runStepTest(stepNumber) {
 
             case 4:
                 // Test overall connection
-                result = await adminFetch('/diagnostics/healthz');
+                result = await adminFetch('/admin/diagnostics/healthz');
                 if (result && result.status === 'OK') {
                     stepStatuses[4] = 'ok';
                     showNotification(true, 'Paso 4 Completado', 'Todos los servicios están conectados.');
@@ -2205,7 +2205,7 @@ async function runStepTest(stepNumber) {
                 // Send test WhatsApp message
                 const testNumber = prompt('Ingresa tu número de WhatsApp para la prueba (+549XXXXXXXXXX):');
                 if (testNumber) {
-                    result = await adminFetch('/diagnostics/whatsapp/send_test', 'POST', {
+                    result = await adminFetch('/admin/diagnostics/whatsapp/send_test', 'POST', {
                         to: testNumber,
                         text: 'CodExy test: reply PING',
                         correlation_id: correlationId
@@ -2235,7 +2235,7 @@ function startWebhookMonitoring(correlationId) {
     // Poll for webhook events
     const checkInterval = setInterval(async () => {
         try {
-            const events = await adminFetch('/diagnostics/events/stream?limit=10');
+            const events = await adminFetch('/admin/diagnostics/events/stream?limit=10');
             if (events && events.events) {
                 const webhookEvent = events.events.find(e =>
                     e.event_type === 'webhook_received' &&
@@ -2273,7 +2273,7 @@ function startWebhookMonitoring(correlationId) {
 function checkBotResponse(correlationId) {
     const checkInterval = setInterval(async () => {
         try {
-            const events = await adminFetch('/diagnostics/events/stream?limit=10');
+            const events = await adminFetch('/admin/diagnostics/events/stream?limit=10');
             if (events && events.events) {
                 const responseEvent = events.events.find(e =>
                     e.event_type === 'agent_response_sent' &&
