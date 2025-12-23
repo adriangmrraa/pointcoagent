@@ -158,11 +158,12 @@ async def lifespan(app: FastAPI):
         -- HITL & Chat History Schema (Strict Implementation)
         -- Ensure pgcrypto for UUIDs (if available, else fallback to text or app-generated handled via DEFAULT if supported)
         -- We will try to create extension, ignore if fails (could be managed permissions)
-        BEGIN;
+        DO $$
+        BEGIN
             CREATE EXTENSION IF NOT EXISTS pgcrypto;
         EXCEPTION WHEN OTHERS THEN
             RAISE NOTICE 'Could not create extension pgcrypto - assuming it exists or not needed if manually handling UUIDs';
-        END;
+        END $$;
 
         -- 1. chat_conversations
         CREATE TABLE IF NOT EXISTS chat_conversations (
@@ -183,14 +184,15 @@ async def lifespan(app: FastAPI):
         
         -- Schema Repair / Migration (Idempotent)
         -- Ensure columns exist if table was created by older version
-        BEGIN;
+        DO $$
+        BEGIN
             ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS last_message_preview TEXT;
             ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ;
             ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS avatar_url TEXT;
             ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS human_override_until TIMESTAMPTZ;
         EXCEPTION WHEN OTHERS THEN
             RAISE NOTICE 'Schema repair failed for chat_conversations';
-        END;
+        END $$;
         -- Add unique constraint if not exists
         DO $$
         BEGIN
