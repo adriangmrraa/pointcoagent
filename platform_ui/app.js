@@ -620,10 +620,7 @@ async function saveHandoffSettings() {
     };
 
     try {
-        const res = await adminFetch('/admin/handoff', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
+        const res = await adminFetch('/admin/handoff', 'POST', payload);
 
         if (res) {
             showNotification(true, 'Éxito', 'Configuración de derivación guardada correctamente.');
@@ -636,11 +633,8 @@ async function saveHandoffSettings() {
 }
 
 async function saveCredential(name, value, category, scope, tenantId) {
-    return await adminFetch('/admin/credentials', {
-        method: 'POST',
-        body: JSON.stringify({
-            name, value, category, scope, tenant_id: tenantId
-        })
+    return await adminFetch('/admin/credentials', 'POST', {
+        name, value, category, scope, tenant_id: tenantId
     });
 }
 
