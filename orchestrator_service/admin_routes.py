@@ -346,34 +346,53 @@ async def upsert_handoff_config(config: HandoffConfigModel):
     else:
         password_to_store = encrypt_password(config.smtp_password)
 
-    q = """
-        INSERT INTO tenant_human_handoff_config (
-            tenant_id, enabled, destination_email, handoff_instructions, handoff_message,
-            smtp_host, smtp_port, smtp_security, smtp_username, smtp_password_encrypted, 
-            triggers, email_context, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-        ON CONFLICT (tenant_id) DO UPDATE SET
-            enabled = EXCLUDED.enabled,
-            destination_email = EXCLUDED.destination_email,
-            handoff_instructions = EXCLUDED.handoff_instructions,
-            handoff_message = EXCLUDED.handoff_message,
-            smtp_host = EXCLUDED.smtp_host,
-            smtp_port = EXCLUDED.smtp_port,
-            smtp_security = EXCLUDED.smtp_security,
-            smtp_username = EXCLUDED.smtp_username,
-            smtp_password_encrypted = EXCLUDED.smtp_password_encrypted,
-            triggers = EXCLUDED.triggers,
-            email_context = EXCLUDED.email_context,
-            updated_at = NOW()
-    """
-    await db.pool.execute(
-        q, 
-        config.tenant_id, config.enabled, config.destination_email, 
-        config.handoff_instructions, config.handoff_message,
-        config.smtp_host, config.smtp_port, config.smtp_security,
-        config.smtp_username, password_to_store, 
-        json.dumps(config.triggers), json.dumps(config.email_context)
-    )
+    # Manual Upsert to avoid "InvalidColumnReferenceError" if constraints are missing or duplicated
+    # 1. Check if exists
+    existing = await db.pool.fetchrow("SELECT 1 FROM tenant_human_handoff_config WHERE tenant_id = $1", config.tenant_id)
+    
+    if existing:
+        # UPDATE
+        q = """
+            UPDATE tenant_human_handoff_config SET
+                enabled = $2,
+                destination_email = $3,
+                handoff_instructions = $4,
+                handoff_message = $5,
+                smtp_host = $6,
+                smtp_port = $7,
+                smtp_security = $8,
+                smtp_username = $9,
+                smtp_password_encrypted = $10,
+                triggers = $11,
+                email_context = $12,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+        """
+        await db.pool.execute(
+            q, 
+            config.tenant_id, config.enabled, config.destination_email, 
+            config.handoff_instructions, config.handoff_message,
+            config.smtp_host, config.smtp_port, config.smtp_security,
+            config.smtp_username, password_to_store, 
+            json.dumps(config.triggers), json.dumps(config.email_context)
+        )
+    else:
+        # INSERT
+        q = """
+            INSERT INTO tenant_human_handoff_config (
+                tenant_id, enabled, destination_email, handoff_instructions, handoff_message,
+                smtp_host, smtp_port, smtp_security, smtp_username, smtp_password_encrypted, 
+                triggers, email_context, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        """
+        await db.pool.execute(
+            q, 
+            config.tenant_id, config.enabled, config.destination_email, 
+            config.handoff_instructions, config.handoff_message,
+            config.smtp_host, config.smtp_port, config.smtp_security,
+            config.smtp_username, password_to_store, 
+            json.dumps(config.triggers), json.dumps(config.email_context)
+        )
 
     # Mirror to 'credentials' table for visibility in UI
     await db.pool.execute(
