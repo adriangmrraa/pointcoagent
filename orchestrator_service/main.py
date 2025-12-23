@@ -497,13 +497,16 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
         except:
             raise HTTPException(status_code=503, detail="Database connection pool not initialized (Check DSN/Connectivity)")
 
-    # Normal phone number (strip + if present)
-    clean_phone = tenant_phone.lstrip('+')
-    logger.info("tenant_lookup_attempt", raw=tenant_phone, cleaned=clean_phone)
+    # Normalize phone numbers for lookup
+    # Heuristic: Match matches if the DB number Ends With the user's last 8 digits (ignoring area codes/prefixes)
+    # This solves +549 vs 549 vs 09 issues.
+    short_phone = tenant_phone.strip()[-8:] 
+    
+    logger.info("tenant_lookup_attempt", raw=tenant_phone, search_suffix=short_phone)
 
     tenant = await db.pool.fetchrow(
-        "SELECT store_name, system_prompt_template, store_catalog_knowledge, tiendanube_store_id, tiendanube_access_token FROM tenants WHERE bot_phone_number = $1 OR bot_phone_number = $2", 
-        clean_phone, f"+{clean_phone}"
+        "SELECT store_name, system_prompt_template, store_catalog_knowledge, tiendanube_store_id, tiendanube_access_token FROM tenants WHERE bot_phone_number LIKE $1", 
+        f"%{short_phone}"
     )
     if not tenant:
         logger.warning("tenant_lookup_failed", searched=[clean_phone, f"+{clean_phone}"], note="Verify DB entry matches YCloud 'to' number")
