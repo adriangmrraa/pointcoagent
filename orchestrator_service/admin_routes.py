@@ -19,7 +19,7 @@ async def verify_admin_token(x_admin_token: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid Admin Token")
 
 # --- Models ---
-from .utils import encrypt_password, decrypt_password
+from utils import encrypt_password, decrypt_password
 
 class HandoffConfigModel(BaseModel):
     tenant_id: UUID

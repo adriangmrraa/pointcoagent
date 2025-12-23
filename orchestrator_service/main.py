@@ -88,7 +88,7 @@ class ToolError(BaseModel):
 
 # FastAPI App
 from contextlib import asynccontextmanager
-from .utils import encrypt_password, decrypt_password
+from utils import encrypt_password, decrypt_password
 from admin_routes import router as admin_router, sync_environment
 
 @asynccontextmanager
