@@ -231,11 +231,11 @@ async def delete_all_tenants():
 @router.delete("/tenants/{identifier}", dependencies=[Depends(verify_admin_token)])
 async def delete_tenant(identifier: str):
     import re
-    if identifier.isdigit():
-        # Delete by numeric ID
+    # If the identifier is a short number, assume it's an ID
+    if identifier.isdigit() and len(identifier) < 8:
         await db.pool.execute("DELETE FROM tenants WHERE id = $1", int(identifier))
     else:
-        # Handle phone number (raw and cleaned)
+        # Otherwise, treat as phone number
         clean_phone = re.sub(r'[^0-9]', '', identifier)
         await db.pool.execute("DELETE FROM tenants WHERE bot_phone_number = $1 OR bot_phone_number = $2", identifier, clean_phone)
     return {"status": "ok"}
@@ -303,7 +303,7 @@ async def create_credential(cred: CredentialModel):
     q_upsert = """
     INSERT INTO credentials (name, value, category, scope, tenant_id, description, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, NOW())
-    ON CONFLICT (name, scope) 
+    ON CONFLICT ON CONSTRAINT unique_name_scope 
     DO UPDATE SET 
         value = EXCLUDED.value,
         category = EXCLUDED.category,

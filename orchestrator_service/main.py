@@ -10,6 +10,7 @@ import structlog
 import httpx
 from typing import Any, Dict, List, Optional, Union, Literal
 from fastapi import FastAPI, HTTPException, Header, Depends, status, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from contextvars import ContextVar
 from pydantic import BaseModel, Field
@@ -79,24 +80,19 @@ class ToolError(BaseModel):
     retryable: bool
     details: Optional[Dict[str, Any]] = None
 
-# --- Application Startup ---
-from fastapi.middleware.cors import CORSMiddleware
-app = FastAPI(title="Orchestrator Service", version="1.0.0")
+# FastAPI App Initialization
+app = FastAPI(
+    title="Orchestrator Service",
+    description="Central intelligence for Kilocode microservices.",
+    version="1.1.0",
+    lifespan=lifespan
+)
 
-# CORS Configuration
-origins = [
-    "http://localhost",
-    "http://localhost:5173",
-    "http://localhost:4173",
-    "https://docker-frontend-react.yn8wow.easypanel.host",
-    "https://docker-platform-ui.yn8wow.easypanel.host",
-    "https://docker-bff-service.yn8wow.easypanel.host"
-]
-
+# CORS Configuration - Broadly permissive for administrative UI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -181,14 +177,28 @@ async def lifespan(app: FastAPI):
             description TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW(),
-            UNIQUE(name, scope)
+            CONSTRAINT unique_name_scope UNIQUE(name, scope)
         );
         
-        -- Add updated_at if it doesn't exist (incremental fix)
+        -- Fix existing table if it was created before these columns/constraints
         DO $$ 
         BEGIN 
+            -- Check for updated_at column
             IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='credentials' AND column_name='updated_at') THEN
                 ALTER TABLE credentials ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+            END IF;
+
+            -- Check for UNIQUE constraint (name, scope)
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint 
+                WHERE conname = 'unique_name_scope' AND conrelid = 'credentials'::regclass
+            ) THEN
+                -- If we can't add it due to duplicates, we'll log it but here we'll try to add it
+                BEGIN
+                    ALTER TABLE credentials ADD CONSTRAINT unique_name_scope UNIQUE(name, scope);
+                EXCEPTION WHEN others THEN
+                    RAISE NOTICE 'Could not add unique constraint to credentials - likely duplicates exist';
+                END;
             END IF;
         END $$;
         
@@ -248,22 +258,7 @@ CATALOGO:
     await db.disconnect()
     logger.info("db_disconnected")
 
-app = FastAPI(
-    title="Orchestrator Service",
-    description="Central intelligence for Kilocode microservices.",
-    lifespan=lifespan
-)
-
-# --- CORS Middleware (Required for Platform UI in Browser) ---
-from fastapi.middleware.cors import CORSMiddleware
-app.add_middleware(
-    CORSMiddleware,
-    # Simplified CORS for maximum compatibility
-    allow_origins=["*"],
-    allow_credentials=False, # We use token headers, not cookies
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# (Middleware and app instance moved to top)
 
 @app.get("/health")
 async def health_check():

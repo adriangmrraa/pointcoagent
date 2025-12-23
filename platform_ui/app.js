@@ -75,10 +75,14 @@ function openModal(id) {
     document.getElementById(id).style.display = 'flex';
 
     if (id === 'ycloud-config-modal') {
-        loadTenantSelector('ycloud-tenant-select');
+        loadTenantSelector('ycloud-tenant-select').then(() => {
+            loadYCloudConfig();
+        });
     }
     if (id === 'whatsapp-meta-modal') {
-        loadTenantSelector('whatsapp-meta-tenant-select');
+        loadTenantSelector('whatsapp-meta-tenant-select').then(() => {
+            loadMetaConfig();
+        });
     }
 }
 
@@ -447,11 +451,27 @@ async function loadTools() {
                 <td>${t.type}</td>
                 <td>${t.service_url || 'N/A'}</td>
                 <td>
-                    <button class="btn-secondary" style="padding: 5px 12px; font-size: 12px">Configurar</button>
+                    <button class="btn-secondary" style="padding: 5px 12px; font-size: 12px" onclick="configureTool('${t.name}')">Configurar</button>
+                    <button class="btn-delete" style="padding: 5px 12px; font-size: 12px" onclick="deleteTool('${t.name}')">Eliminar</button>
                 </td>
             `;
             container.appendChild(tr);
         });
+    }
+}
+
+function configureTool(name) {
+    // Current tools are hardcoded in backend, so we just show an info for now
+    // or open the modal if we had tool data
+    openModal('tool-modal');
+    // Pre-fill name if editing
+    const form = document.getElementById('tool-form');
+    form.elements['name'].value = name;
+}
+
+async function deleteTool(name) {
+    if (confirm(`¿Estás seguro de eliminar la herramienta ${name}?`)) {
+        showNotification(true, 'Procesando', 'Las herramientas predefinidas no se pueden eliminar en esta versión.');
     }
 }
 
@@ -1214,6 +1234,20 @@ async function testWhatsAppMetaConnection() {
     } catch (error) {
         resultDiv.innerHTML = `<div style="color: var(--accent)">❌ Error de conexión: ${error.message}</div>`;
         showNotification(false, 'Error de Conexión', 'No se pudo verificar la conexión con WhatsApp Meta API.');
+    }
+}
+
+async function testTenantConnection(phone, storeId, token) {
+    showNotification(false, 'Probando...', `Verificando conexión para ${phone}...`);
+    try {
+        const res = await adminFetch(`/admin/tenants/${phone}/test-message`, 'POST');
+        if (res && res.status === 'ok') {
+            showNotification(true, 'Test Exitoso', 'El mensaje de prueba se encoló correctamente.');
+        } else {
+            showNotification(false, 'Error en Test', 'El servidor retornó un error al intentar enviar el mensaje.');
+        }
+    } catch (error) {
+        showNotification(false, 'Error de Conexión', error.message);
     }
 }
 
@@ -2742,6 +2776,43 @@ document.getElementById('whatsapp-meta-form').addEventListener('submit', async (
     closeModal('whatsapp-meta-modal');
 });
 
+// Load existing YCloud config
+async function loadYCloudConfig() {
+    try {
+        const creds = await adminFetch('/admin/credentials');
+        const apiKey = creds.find(c => c.name === 'YCLOUD_API_KEY');
+        const webhookSecret = creds.find(c => c.name === 'YCLOUD_WEBHOOK_SECRET');
+
+        const form = document.getElementById('ycloud-form');
+        if (apiKey) form.elements['api_key'].value = apiKey.value;
+        if (webhookSecret) form.elements['webhook_secret'].value = webhookSecret.value;
+        if (apiKey && apiKey.tenant_id) form.elements['tenant_id'].value = apiKey.tenant_id;
+    } catch (error) {
+        console.error('Error loading YCloud config:', error);
+    }
+}
+
+// Load existing Meta config
+async function loadMetaConfig() {
+    try {
+        const creds = await adminFetch('/admin/credentials');
+        const form = document.getElementById('whatsapp-meta-form');
+
+        const token = creds.find(c => c.name === 'WHATSAPP_ACCESS_TOKEN');
+        const phoneId = creds.find(c => c.name === 'WHATSAPP_PHONE_NUMBER_ID');
+        const bizId = creds.find(c => c.name === 'WHATSAPP_BUSINESS_ACCOUNT_ID');
+        const verToken = creds.find(c => c.name === 'WHATSAPP_VERIFY_TOKEN');
+
+        if (token) form.elements['access_token'].value = token.value;
+        if (phoneId) form.elements['phone_number_id'].value = phoneId.value;
+        if (bizId) form.elements['business_account_id'].value = bizId.value;
+        if (verToken) form.elements['verify_token'].value = verToken.value;
+        if (token && token.tenant_id) form.elements['tenant_id'].value = token.tenant_id;
+    } catch (error) {
+        console.error('Error loading Meta config:', error);
+    }
+}
+
 // Expose functions to global scope for HTML onclick
 window.showView = showView;
 window.openModal = openModal;
@@ -2774,3 +2845,7 @@ window.openTenantDetailModal = openTenantDetailModal;
 window.showCredentialTab = showCredentialTab;
 window.editTenantFromDetail = editTenantFromDetail;
 window.selectService = selectService;
+window.configureTool = configureTool;
+window.deleteTool = deleteTool;
+window.loadYCloudConfig = loadYCloudConfig;
+window.testTenantConnection = testTenantConnection;
