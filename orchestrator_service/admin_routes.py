@@ -645,8 +645,8 @@ async def analytics_summary(tenant_id: int = 1, from_date: str = None, to_date: 
                 "human": human_msgs or 0
             }
         }
+        }
     }
-    """
     except Exception as e:
         print(f"ERROR analytics_summary: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analytics error: {str(e)}")
