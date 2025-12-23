@@ -47,6 +47,11 @@ function showView(viewId, event = null) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
+    // Reset mobile chat layout if switching views
+    const layout = document.querySelector('.chats-layout');
+    if (layout) layout.classList.remove('mobile-chat-active');
+
+
     document.getElementById(`view-${viewId}`).classList.add('active');
 
     // Add active class to clicked element if event provided
@@ -2964,6 +2969,12 @@ async function selectChat(chatId, chatObj = null) {
         document.getElementById('chat-current-phone').textContent = chatObj.display_name || chatObj.external_user_id;
     }
 
+    // Mobile View Toggle
+    const layout = document.querySelector('.chats-layout');
+    if (layout) {
+        layout.classList.add('mobile-chat-active');
+    }
+
     // Reset history tracking
     renderedMessageIds.clear();
     const messagesArea = document.getElementById('chat-messages-area');
@@ -2971,6 +2982,17 @@ async function selectChat(chatId, chatObj = null) {
 
     // Initial Load
     await loadChatHistory(chatId);
+}
+
+function backToChatList() {
+    activeChatId = null;
+    renderedMessageIds.clear();
+    const layout = document.querySelector('.chats-layout');
+    if (layout) {
+        layout.classList.remove('mobile-chat-active');
+    }
+    // Highlighting reset
+    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
 }
 
 async function loadChatHistory(chatId) {
