@@ -238,6 +238,16 @@ async def lifespan(app: FastAPI):
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
 
+        -- 4. system_events (New for Console Observability)
+        CREATE TABLE IF NOT EXISTS system_events (
+            id SERIAL PRIMARY KEY,
+            level VARCHAR(16) NOT NULL, -- info, warn, error
+            event_type VARCHAR(64) NOT NULL, -- http_request, tool_use, system
+            message TEXT,
+            metadata JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
         -- Indexes
         CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages (conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_chat_conversations_tenant ON chat_conversations (tenant_id, updated_at DESC);
