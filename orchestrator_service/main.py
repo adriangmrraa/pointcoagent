@@ -245,12 +245,16 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
             """,
-            # 9b. Chat Messages Repair (Ensure media_id exists)
+            # 9b. Chat Messages Repair (Ensure all new columns exist)
             """
             DO $$
             BEGIN
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_id UUID;
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS human_override BOOLEAN DEFAULT false;
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'text';
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_context VARCHAR(64);
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS ycloud_message_id VARCHAR(128);
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS provider_status VARCHAR(32);
             EXCEPTION WHEN OTHERS THEN
                 RAISE NOTICE 'Schema repair failed for chat_messages';
             END $$;
