@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI):
             # 1c. Tenant Human Handoff Config (Final Spec + Consistency)
             """
             CREATE TABLE IF NOT EXISTS tenant_human_handoff_config (
-                tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+                tenant_id INTEGER PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 destination_email TEXT NOT NULL,
                 handoff_instructions TEXT, 

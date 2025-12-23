@@ -22,7 +22,7 @@ async def verify_admin_token(x_admin_token: str = Header(None)):
 from utils import encrypt_password, decrypt_password
 
 class HandoffConfigModel(BaseModel):
-    tenant_id: uuid.UUID
+    tenant_id: int
     enabled: bool = True
     destination_email: str
     handoff_instructions: str = ""
@@ -322,7 +322,7 @@ async def get_chat_history(conversation_id: str):
 # --- Multi-Tenancy Routes ---
 
 @router.get("/handoff/{tenant_id}", dependencies=[Depends(verify_admin_token)])
-async def get_handoff_config(tenant_id: uuid.UUID):
+async def get_handoff_config(tenant_id: int):
     config = await db.pool.fetchrow("SELECT * FROM tenant_human_handoff_config WHERE tenant_id = $1", tenant_id)
     if not config:
         return None
