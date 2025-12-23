@@ -527,15 +527,47 @@ async def delete_all_tenants():
 
 @router.delete("/tenants/{identifier}", dependencies=[Depends(verify_admin_token)])
 async def delete_tenant(identifier: str):
-    import re
-    # If the identifier is a short number, assume it's an ID
-    if identifier.isdigit() and len(identifier) < 8:
-        await db.pool.execute("DELETE FROM tenants WHERE id = $1", int(identifier))
+    # Determine ID vs Phone
+    tenant_id = None
+    if identifier.isdigit() and len(identifier) < 9: # Assuming valid IDs are short ints
+        tenant_id = int(identifier)
     else:
-        # Otherwise, treat as phone number
-        clean_phone = re.sub(r'[^0-9]', '', identifier)
-        await db.pool.execute("DELETE FROM tenants WHERE bot_phone_number = $1 OR bot_phone_number = $2", identifier, clean_phone)
-    return {"status": "ok"}
+        # Resolve ID from phone
+        import re
+        clean = re.sub(r'[^0-9]', '', identifier)
+        row = await db.pool.fetchrow("SELECT id FROM tenants WHERE bot_phone_number = $1 OR bot_phone_number = $2", identifier, clean)
+        if row:
+            tenant_id = row['id']
+    
+    if not tenant_id:
+        # If not found, return OK effectively (idempotent) or 404. 
+        # But user says "still there", so likely it failed silently before.
+        return {"status": "ok", "message": "Tenant not found or already deleted"}
+
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            # 1. Delete credentials specific to tenant
+            await conn.execute("DELETE FROM credentials WHERE tenant_id = $1", tenant_id)
+            
+            # 2. Delete conversations and messages (Cascade usually handles this if configured, but manual is safer without knowing schema fully)
+            # Find chat IDs
+            chat_rows = await conn.fetch("SELECT id FROM chat_conversations WHERE tenant_id = $1", tenant_id)
+            chat_ids = [r['id'] for r in chat_rows]
+            
+            if chat_ids:
+                # Delete messages
+                await conn.execute("DELETE FROM chat_messages WHERE conversation_id = ANY($1::uuid[])", chat_ids)
+                # Delete conversations
+                await conn.execute("DELETE FROM chat_conversations WHERE tenant_id = $1", tenant_id)
+
+            # 3. Delete Handoff Config
+            # Check if table exists (it's new)
+            await conn.execute("DELETE FROM tenant_human_handoff_config WHERE tenant_id = $1", tenant_id)
+
+            # 4. Delete Tenant
+            await conn.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+
+    return {"status": "ok", "deleted_id": tenant_id}
 
 @router.get("/tenants/{id}/details", dependencies=[Depends(verify_admin_token)])
 async def get_tenant_details(id: int):
@@ -573,7 +605,7 @@ async def get_tenant_details(id: int):
                 ycloud_keys.add(c['name'])
             if c['name'] in ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID']:
                 meta_keys.add(c['name'])
-        else:
+        elif c['scope'] == 'global':  # Explicitly check scope to avoid mixing other tenants' data if query failed (paranoid check)
             resp["credentials"]["global_available"].append(c_dict)
             # Global Check
             if c['name'] in ['YCLOUD_API_KEY', 'YCLOUD_WEBHOOK_SECRET']:
