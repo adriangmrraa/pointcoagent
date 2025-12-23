@@ -34,7 +34,7 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import tool
 from langchain.memory import ConversationBufferMemory
 from langchain_community.chat_message_histories import RedisChatMessageHistory
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from db import db
@@ -245,22 +245,24 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
             """,
-            # 9b. Chat Messages Repair (Ensure all new columns exist and fix missing conversation_id)
+            # 9b. Chat Messages Repair (Comprehensive Repair to avoid missing columns)
             """
             DO $$
             BEGIN
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS tenant_id INTEGER;
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS conversation_id UUID;
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS role VARCHAR(32);
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'text';
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS content TEXT;
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_id UUID;
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS human_override BOOLEAN DEFAULT false;
-                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'text';
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_by_user_id TEXT;
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_from VARCHAR(64);
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sent_context VARCHAR(64);
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS ycloud_message_id VARCHAR(128);
                 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS provider_status VARCHAR(32);
-                
-                -- Attempt to add constraint if conversation_id exists and constraint does not
-                -- (Skip complex validation, just ensure column exists to prevent 500 error)
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS correlation_id TEXT;
+                ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS from_number VARCHAR(128);
             EXCEPTION WHEN OTHERS THEN
                 RAISE NOTICE 'Schema repair failed for chat_messages';
             END $$;
@@ -1012,12 +1014,12 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     await db.pool.execute("""
         INSERT INTO chat_messages (
             id, tenant_id, conversation_id, role, content, 
-            correlation_id, created_at, message_type, media_id
+            correlation_id, created_at, message_type, media_id, from_number
         ) VALUES (
             $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'user', $3,
-            $4, NOW(), $5, $6
+            $4, NOW(), $5, $6, $7
         )
-    """, str(uuid.uuid4()), conv_id, content, correlation_id, message_type, media_id)
+    """, str(uuid.uuid4()), conv_id, content, correlation_id, message_type, media_id, event.from_number)
     
     # Update Conversation Metadata
     preview_text = content[:50] if content else f"[{message_type}]"
@@ -1034,22 +1036,30 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
 
 
 
-    # --- 4. Invoke Agent (If not locked) ---
+    # --- 4. Invoke Agent (Unified PostgreSQL Memory) ---
     
-    # Chat History
-    session_id = f"{event.from_number}"
-    memory = ConversationBufferMemory(
-        memory_key="chat_history", 
-        return_messages=True,
-        chat_memory=RedisChatMessageHistory(url=REDIS_URL, session_id=session_id)
-    )
+    # Load History from PostgreSQL
+    history_rows = await db.pool.fetch("""
+        SELECT role, content 
+        FROM chat_messages 
+        WHERE conversation_id = $1 
+        ORDER BY created_at ASC 
+        LIMIT 20
+    """, conv_id)
+    
+    chat_history = []
+    for h in history_rows:
+        if h['role'] == 'user':
+            chat_history.append(HumanMessage(content=h['content'] or ""))
+        elif h['role'] in ['assistant', 'human_supervisor']:
+            chat_history.append(AIMessage(content=h['content'] or ""))
     
     # Dynamic Agent Loading
     tenant_lookup = event.to_number or event.from_number
     executor = await get_agent_executable(tenant_phone=tenant_lookup)
     
     try:
-        inputs = {"input": event.text, "chat_history": memory.chat_memory.messages}
+        inputs = {"input": event.text, "chat_history": chat_history}
         result = await executor.ainvoke(inputs)
         output = result["output"] 
         
@@ -1153,22 +1163,29 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
 
 
         # Store Assistant Response
-        raw_output_str = output.json() if hasattr(output, 'json') else json.dumps(output)
-        
+        raw_output_str = ""
+        if isinstance(output, str):
+            raw_output_str = output
+        else:
+            try:
+                # If output is OrchestratorResponse or similar
+                if hasattr(output, 'dict'):
+                    raw_output_str = json.dumps(output.dict(), ensure_ascii=False)
+                else:
+                    raw_output_str = json.dumps(output, ensure_ascii=False)
+            except:
+                raw_output_str = str(output)
+
         await db.pool.execute("""
             INSERT INTO chat_messages (
-                id, tenant_id, conversation_id, role, content, correlation_id, created_at
+                id, tenant_id, conversation_id, role, content, correlation_id, created_at, from_number
             ) VALUES (
-                $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'assistant', $3, $4, NOW()
+                $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'assistant', $3, $4, NOW(), $5
             )
-        """, str(uuid.uuid4()), conv_id, raw_output_str, correlation_id)
+        """, str(uuid.uuid4()), conv_id, raw_output_str, correlation_id, event.from_number)
         
         # Track Usage
         await db.pool.execute("UPDATE tenants SET total_tool_calls = total_tool_calls + 1 WHERE bot_phone_number = $1", event.from_number)
-        
-        # Update Memory
-        memory.chat_memory.add_user_message(event.text)
-        memory.chat_memory.add_ai_message(raw_output_str)
 
         return OrchestratorResult(
             status="ok", 

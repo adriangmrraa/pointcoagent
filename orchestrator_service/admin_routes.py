@@ -248,7 +248,7 @@ async def get_chat_history(conversation_id: str):
     query = """
         SELECT 
             m.id, m.role, m.message_type, m.content, m.created_at, m.human_override,
-            m.sent_context, m.provider_status,
+            m.sent_context, m.provider_status, m.media_id,
             med.storage_url, med.media_type, med.mime_type, med.file_name
         FROM chat_messages m
         LEFT JOIN chat_media med ON m.media_id = med.id
@@ -418,21 +418,30 @@ async def send_manual_message(data: dict):
     
     to_number = data.get("to")
     
-    # 1. Persist in DB as 'human_supervisor'
-    # We generate a correlation_id for tracking
-    correlation_id = str(uuid.uuid4())
+    # 1. Resolve Conversation
+    channel = data.get("channel", "whatsapp")
+    conv_row = await db.pool.fetchrow("""
+        SELECT id FROM chat_conversations 
+        WHERE channel = $1 AND external_user_id = $2
+    """, channel, to_number)
     
-    # We need the 'from_number' which represents the user this message is sent TO (in the context of chat history)
-    # Wait, in `chat_messages`:
-    # `from_number` IS the user phone number.
-    # `role` determines who sent it. 'user' = from them. 'assistant' = from bot. 'human_supervisor' = from human.
-    
+    if not conv_row:
+         # Create it
+         conv_id = await db.pool.fetchval("""
+            INSERT INTO chat_conversations (id, tenant_id, channel, external_user_id, status)
+            VALUES ($1, $2, $3, $4, 'human_override')
+            RETURNING id
+         """, str(uuid.uuid4()), tenant_id, channel, to_number)
+    else:
+         conv_id = conv_row['id']
+
+    # 2. Persist in DB as 'human_supervisor'
     await db.pool.execute(
         """
-        INSERT INTO chat_messages (id, from_number, role, content, correlation_id, created_at)
-        VALUES ($1, $2, 'human_supervisor', $3, $4, NOW())
+        INSERT INTO chat_messages (id, tenant_id, conversation_id, role, content, correlation_id, created_at, from_number)
+        VALUES ($1, $2, $3, 'human_supervisor', $4, $5, NOW(), $6)
         """,
-        str(uuid.uuid4()), to_number, msg_content, correlation_id
+        str(uuid.uuid4()), tenant_id, conv_id, msg_content, correlation_id, to_number
     )
     
     # 2. Forward to Whatsapp Service
