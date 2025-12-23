@@ -226,6 +226,20 @@
                                     <h3 id="chat-current-phone">Loading...</h3>
                                     <span class="chat-role-badge">WhatsApp User</span>
                                 </div>
+                                <div class="chat-controls"
+                                    style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+                                    <label class="switch-toggle"
+                                        style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                        <span id="human-override-label"
+                                            style="font-size: 13px; color: var(--text-secondary);">Agente Activo</span>
+                                        <div class="toggle-wrapper"
+                                            style="position: relative; width: 44px; height: 24px;">
+                                            <input type="checkbox" id="human-override-toggle"
+                                                onchange="toggleHumanOverride()">
+                                            <span class="slider round"></span>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
 
                             <div class="chat-messages" id="chat-messages-area">

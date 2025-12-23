@@ -3281,6 +3281,44 @@ function createBubbleElement(msg, container) {
     container.appendChild(div);
 }
 
+async function toggleHumanOverride() {
+    if (!activeChatId) return;
+
+    const toggle = document.getElementById('human-override-toggle');
+    const label = document.getElementById('human-override-label');
+    const isEnabled = toggle.checked;
+
+    // Optimistic UI update
+    label.innerText = isEnabled ? "Atención Humana" : "Agente Activo";
+    label.style.color = isEnabled ? "#ef4444" : "#22c55e"; // Red/Green
+
+    try {
+        const res = await adminFetch(`/admin/conversations/${activeChatId}/human-override`, 'POST', {
+            enabled: isEnabled
+        });
+
+        if (res.status !== 'ok' && !res.human_override_enabled === isEnabled) throw new Error("API Error");
+
+        // Update local state in allChats to prevent UI flicker on reload
+        const chat = allChats.find(c => c.id === activeChatId);
+        if (chat) {
+            chat.is_locked = isEnabled;
+            chat.status = isEnabled ? 'human_override' : 'active';
+            chat.human_override_until = isEnabled ? '2099-01-01T00:00:00' : null;
+        }
+        showNotification(true, 'Estado Actualizado', isEnabled ? 'Atención Humana Activada' : 'Agente IA Reactivado');
+
+    } catch (e) {
+        console.error("Toggle override failed", e);
+        showNotification(false, 'Error', 'No se pudo cambiar el estado.');
+        // Revert UI
+        toggle.checked = !isEnabled;
+        label.innerText = !isEnabled ? "Atención Humana" : "Agente Activo";
+        label.style.color = !isEnabled ? "#ef4444" : "#22c55e";
+    }
+}
+
+
 async function sendManualMessage() {
     if (!activeChatId) return;
     const input = document.getElementById('chat-input-text');

@@ -137,7 +137,17 @@ async def bootstrap():
     await sync_environment()
 
     # Get tenants count
-    tenants = await db.pool.fetchval("SELECT COUNT(*) FROM tenants")
+
+class HumanOverrideModel(BaseModel):
+    enabled: bool
+
+class ConversationModel(BaseModel):
+    id: str  # UUID
+    tenant_id: int
+    user_number: str
+    status: str
+    last_message_at: Optional[datetime] = None
+    human_override_until: Optional[datetime] = None
     
     # Get last activity
     last_inbound = await db.pool.fetchval("SELECT MAX(received_at) FROM inbound_messages")
@@ -318,6 +328,19 @@ async def get_chat_history(conversation_id: str):
             "media": media_obj
         })
     return messages
+
+@router.post("/conversations/{conversation_id}/human-override", dependencies=[Depends(verify_admin_token)])
+async def set_human_override(conversation_id: str, body: HumanOverrideModel):
+    if body.enabled:
+        # Lock indefinitely (until 2099)
+        query = "UPDATE chat_conversations SET human_override_until = '2099-01-01 00:00:00' WHERE id = $1"
+    else:
+        # Unlock
+        query = "UPDATE chat_conversations SET human_override_until = NULL WHERE id = $1"
+        
+    await db.pool.execute(query, conversation_id)
+    return {"status": "ok", "human_override_enabled": body.enabled}
+
 
 # --- Multi-Tenancy Routes ---
 
