@@ -44,8 +44,13 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 POSTGRES_DSN = os.getenv("POSTGRES_DSN")
 
 # Fallback Tienda Nube credentials (from Env Vars)
-GLOBAL_TN_STORE_ID = os.getenv("TIENDANUBE_STORE_ID")
-GLOBAL_TN_ACCESS_TOKEN = os.getenv("TIENDANUBE_ACCESS_TOKEN")
+GLOBAL_TN_STORE_ID = os.getenv("TIENDANUBE_STORE_ID") or os.getenv("GLOBAL_TN_STORE_ID")
+GLOBAL_TN_ACCESS_TOKEN = os.getenv("TIENDANUBE_ACCESS_TOKEN") or os.getenv("GLOBAL_TN_ACCESS_TOKEN")
+
+# Global Fallback Content (only used if DB has no specific tenant config)
+GLOBAL_STORE_DESCRIPTION = os.getenv("GLOBAL_STORE_DESCRIPTION")
+GLOBAL_CATALOG_KNOWLEDGE = os.getenv("GLOBAL_CATALOG_KNOWLEDGE")
+GLOBAL_SYSTEM_PROMPT = os.getenv("GLOBAL_SYSTEM_PROMPT")
 
 if not OPENAI_API_KEY:
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -519,25 +524,31 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
         logger.info("tenant_lookup_success", store=tenant['store_name'])
 
     # Set context variables for this execution
-    # USER PRIORITY: Env Vars > DB
-    if GLOBAL_TN_STORE_ID and GLOBAL_TN_ACCESS_TOKEN:
-        logger.info("using_global_env_credentials", store_id=GLOBAL_TN_STORE_ID)
-        tenant_store_id.set(GLOBAL_TN_STORE_ID)
-        tenant_access_token.set(GLOBAL_TN_ACCESS_TOKEN)
-    elif tenant:
+    # Set context variables for this execution
+    # USER PRIORITY: DB First > Global Env Fallback
+    
+    conn_success = False
+    
+    # 1. Try DB Credentials
+    if tenant:
         local_store_id = tenant['tiendanube_store_id']
         local_token = tenant['tiendanube_access_token']
-        
         if local_store_id and local_token:
             logger.info("tenant_found_in_db", store_name=tenant['store_name'], store_id=local_store_id)
             tenant_store_id.set(local_store_id)
             tenant_access_token.set(local_token)
-        else:
-            logger.warning("tenant_record_missing_credentials", store_name=tenant['store_name'])
-    else:
-        logger.warning("no_credentials_found", searched_phone=clean_phone, note="Check both Env Vars and DB 'tenants' table")
+            conn_success = True
     
-    # Default Prompt if DB is empty or tenant not found
+    # 2. Fallback to Global Env if DB failed/missing
+    if not conn_success and GLOBAL_TN_STORE_ID and GLOBAL_TN_ACCESS_TOKEN:
+         logger.info("using_global_env_fallback", store_id=GLOBAL_TN_STORE_ID, reason="db_credentials_missing_or_tenant_not_found")
+         tenant_store_id.set(GLOBAL_TN_STORE_ID)
+         tenant_access_token.set(GLOBAL_TN_ACCESS_TOKEN)
+         conn_success = True
+         
+    if not conn_success:
+        logger.warning("no_credentials_found", searched_phone=clean_phone, note="Check both DB 'tenants' table and Global Env Vars")
+    
     # Default Prompt if DB is empty or tenant not found
     sys_template = ""
     knowledge = ""
@@ -546,14 +557,30 @@ async def get_agent_executable(tenant_phone: str = "5491100000000"):
     store_name = "Pointe Coach"
     store_url = "https://www.pointecoach.shop"
     
+    # Resolve Name/URL
     if tenant:
         store_name = tenant.get('store_name') or store_name
-        store_url = tenant.get('store_website') or store_url
-
+        # store_website logic here if needed
+        
+    # Resolve Knowledge/Description/Prompt (DB > Global Env > Default)
+    
+    # 1. System Template
     if tenant and tenant['system_prompt_template']:
         sys_template = tenant['system_prompt_template']
-        knowledge = tenant['store_catalog_knowledge'] or ""
-        description = tenant['store_description'] or ""
+    elif GLOBAL_SYSTEM_PROMPT:
+        sys_template = GLOBAL_SYSTEM_PROMPT
+        
+    # 2. Knowledge
+    if tenant and tenant['store_catalog_knowledge']:
+        knowledge = tenant['store_catalog_knowledge']
+    elif GLOBAL_CATALOG_KNOWLEDGE:
+        knowledge = GLOBAL_CATALOG_KNOWLEDGE
+        
+    # 3. Description
+    if tenant and tenant['store_description']:
+        description = tenant['store_description']
+    elif GLOBAL_STORE_DESCRIPTION:
+        description = GLOBAL_STORE_DESCRIPTION
     else:
         # Dynamic Fallback Prompt
         sys_template = f"""Eres el asistente virtual de {store_name}.
