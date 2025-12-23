@@ -153,10 +153,12 @@ async def lifespan(app: FastAPI):
             """
             DO $$
             BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_human_handoff_config_pkey') THEN
-                    -- Check if index exists with a different name or create it
-                    CREATE UNIQUE INDEX IF NOT EXISTS tenant_human_handoff_config_tenant_id_idx ON tenant_human_handoff_config (tenant_id);
-                END IF;
+                -- Attempt to add UNIQUE constraint. If it fails due to duplication, ignorance is bliss.
+                BEGIN
+                    ALTER TABLE tenant_human_handoff_config ADD CONSTRAINT tenant_human_handoff_config_tenant_id_key UNIQUE (tenant_id);
+                EXCEPTION WHEN duplicate_object THEN
+                    RAISE NOTICE 'Constraint tenant_human_handoff_config_tenant_id_key already exists';
+                END;
             END $$;
             """,
             # 2. Credentials Table
