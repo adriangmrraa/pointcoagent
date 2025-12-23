@@ -6,6 +6,12 @@ import uuid
 import asyncio
 import redis
 import httpx
+import structlog
+from typing import List, Optional, Dict, Any
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryError
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
