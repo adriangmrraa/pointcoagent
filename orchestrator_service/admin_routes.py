@@ -91,20 +91,16 @@ async def sync_environment():
     # Since we can't easily alter table schema here without migration, we'll do a check-and-insert loop or rely on name uniqueness if enforced.
     # Actually, let's just use Python check to be safe and avoid migration complexity right now.
     
-    existing_creds = await db.pool.fetch("SELECT name FROM credentials WHERE tenant_id IS NULL")
-    existing_names = set(r['name'] for r in existing_creds)
-
     for env_var, category, desc in env_creds:
         val = os.getenv(env_var)
         if val:
-            # We map the Env Var name to the Credential Name shown in UI
-            ui_name = env_var # Simple mapping
-            
-            # Upsert logic manually
-            if ui_name in existing_names:
-                await db.pool.execute("UPDATE credentials SET value = $1 WHERE name = $2 AND tenant_id IS NULL", val, ui_name)
-            else:
-                await db.pool.execute("INSERT INTO credentials (name, value, category, scope, description) VALUES ($1, $2, $3, 'global', $4)", ui_name, val, category, f"{desc} (Auto-detected from ENV)")
+            # Atomic upsert using the unique_name_scope constraint
+            await db.pool.execute("""
+                INSERT INTO credentials (name, value, category, scope, description)
+                VALUES ($1, $2, $3, 'global', $4)
+                ON CONFLICT ON CONSTRAINT unique_name_scope
+                DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """, env_var, val, category, f"{desc} (Auto-detected from ENV)")
 
 # --- Endpoints ---
 
