@@ -149,6 +149,16 @@ async def lifespan(app: FastAPI):
                 updated_at TIMESTAMP DEFAULT NOW()
             );
             """,
+            # 1d. Repair Handoff Config (Ensure PK/Unique)
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_human_handoff_config_pkey') THEN
+                    -- Check if index exists with a different name or create it
+                    CREATE UNIQUE INDEX IF NOT EXISTS tenant_human_handoff_config_tenant_id_idx ON tenant_human_handoff_config (tenant_id);
+                END IF;
+            END $$;
+            """,
             # 2. Credentials Table
             """
             CREATE TABLE IF NOT EXISTS credentials (
