@@ -788,7 +788,7 @@ ACCIÓN REQUERIDA:
 
     # 3. SMTP Send
     try:
-        smtp_host = str(config['smtp_host']).strip() if config['smtp_host'] else ""
+        smtp_host = str(config['smtp_host']).strip().replace("http://", "").replace("https://", "") if config['smtp_host'] else ""
         smtp_user = str(config['smtp_username']).strip() if config['smtp_username'] else ""
         smtp_pass = decrypt_password(config['smtp_password_encrypted'])
         smtp_port = config['smtp_port']

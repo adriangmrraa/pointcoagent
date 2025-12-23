@@ -346,6 +346,10 @@ async def upsert_handoff_config(config: HandoffConfigModel):
     else:
         password_to_store = encrypt_password(config.smtp_password)
 
+    # Clean SMTP Host (remove http/https/spaces)
+    if config.smtp_host:
+        config.smtp_host = str(config.smtp_host).strip().replace("http://", "").replace("https://", "")
+
     # Manual Upsert to avoid "InvalidColumnReferenceError" if constraints are missing or duplicated
     # 1. Check if exists
     existing = await db.pool.fetchrow("SELECT 1 FROM tenant_human_handoff_config WHERE tenant_id = $1", config.tenant_id)
