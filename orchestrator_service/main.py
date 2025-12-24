@@ -366,14 +366,14 @@ REGLAS CRÍTICAS DE RESPUESTA:
 4. SECUENCIA DE BURBUJAS (8 pasos para productos):
    - Burbuja 1: Introducción amigable (ej: "Saluda si te han saludado, luego di Te muestro opciones de bolsos disponibles...").
    - Burbuja 2: SOLO la imageUrl del producto 1.
-   - Burbuja 3: Nombre, precio, variante/stock. Luego un salto de línea y la URL del producto.
+   - Burbuja 3: Nombre, precio, VARIANTES (Colores/Talles resumidos en misma línea). Luego un salto de línea y la URL del producto.
    - Burbuja 4: SOLO la imageUrl del producto 2.
-   - Burbuja 5: Descripción breve. Luego un salto de línea y la URL del producto.
+   - Burbuja 5: DESCRIPCIÓN (breve y fiel). Luego un salto de línea. Nombre, precio, VARIANTES. Luego URL producto.
    - Burbuja 6: SOLO la imageUrl del producto 3 (si hay).
-   - Burbuja 7: Descripción breve. Luego un salto de línea y la URL del producto.
+   - Burbuja 7: DESCRIPCIÓN (breve y fiel). Luego un salto de línea. Nombre, precio, VARIANTES. Luego URL producto.
    - Burbuja 8: CTA Final con la URL general ({STORE_URL}) en una línea nueva o invitación a Fitting si son puntas.
 5. FITTING: Si el usuario pregunta por "zapatillas de punta" por primera vez, recomienda SIEMPRE un fitting en la Burbuja 8.
-6. NO inventes enlaces. Usa los devueltos por las tools.
+6. NO inventes enlaces. Usa los devueltos por las tools. NUNCA inventes descripción, usa la provista.
 7. USO DE CATALOGO: Tu variable {STORE_CATALOG_KNOWLEDGE} contiene las categorías y marcas reales.
    - Antes de llamar a `search_specific_products`, REVISA el catálogo.
    - Si el usuario pide "bolsos", mira que marcas de bolsos hay y busca por marca o categoría exacta (ej: `search_specific_products("Bolsos")`).
@@ -616,20 +616,66 @@ def simplify_product(p):
     if not isinstance(p, dict): return p
     
     # Simplify variants to just a summary of options if needed, or specific prices
-    price = p.get("variants", [{}])[0].get("price", "0")
-    promo_price = p.get("variants", [{}])[0].get("promotional_price", None)
+    variants = p.get("variants") or []
+    if not isinstance(variants, list): variants = []
     
+    price = "0"
+    promo_price = None
+    variant_details = []
+    
+    if variants:
+        v0 = variants[0] if isinstance(variants[0], dict) else {}
+        price = v0.get("price", "0")
+        promo_price = v0.get("promotional_price", None)
+        
+        # Summarize variants (e.g., "Color: Rojo, Azul")
+        seen_options = set()
+        for v in variants:
+            if not isinstance(v, dict): continue
+            v_values = v.get("values") or []
+            if isinstance(v_values, list):
+                for val in v_values:
+                    if isinstance(val, dict):
+                        val_str = val.get("es") or val.get("en") 
+                        if val_str: seen_options.add(val_str)
+        
+        if seen_options:
+            variant_details = list(seen_options)
+
     # Extract first image URL
     image_url = None
-    images = p.get("images", [])
-    if images and isinstance(images, list) and len(images) > 0:
-        image_url = images[0].get("src")
+    images = p.get("images") or []
+    if isinstance(images, list) and len(images) > 0:
+        img0 = images[0]
+        if isinstance(img0, dict):
+            image_url = img0.get("src")
+
+    # Extract and clean description (ROBUST)
+    desc_obj = p.get("description")
+    raw_desc = ""
+    if isinstance(desc_obj, dict):
+        raw_desc = desc_obj.get("es", "")
+    elif isinstance(desc_obj, str):
+        raw_desc = desc_obj
+    else:
+        # Fallback to 'descripción' field if exists
+        raw_desc = p.get("descripción", "") or ""
+
+    if not isinstance(raw_desc, str): raw_desc = ""
+
+    # Remove simple HTML tags for token saving
+    clean_desc = re.sub('<[^<]+?>', '', raw_desc)
+    # Truncate if too long (e.g. 300 chars)
+    if len(clean_desc) > 300:
+        clean_desc = clean_desc[:297] + "..."
 
     return {
         "id": p.get("id"),
         "name": p.get("name", {}).get("es", "Sin nombre"),
         "price": price,
         "promotional_price": promo_price,
+        "description": clean_desc, 
+        "variants": ", ".join(variant_details), 
         "url": p.get("canonical_url"),
         "imageUrl": image_url
     }
@@ -949,13 +995,13 @@ REGLAS CRÍTICAS DE RESPUESTA:
 4. SECUENCIA DE BURBUJAS (8 pasos para productos):
    - Burbuja 1: Introducción amigable (ej: "Saluda si te han saludado, luego di Te muestro opciones de bolsos disponibles...").
    - Burbuja 2: SOLO la imageUrl del producto 1.
-   - Burbuja 3: Nombre, precio, variante/stock. Luego un salto de línea y la URL del producto.
+   - Burbuja 3: Nombre, precio, VARIANTES (Colores/Talles resumidos en misma línea). Luego un salto de línea y la URL del producto.
    - Burbuja 4: SOLO la imageUrl del producto 2.
-   - Burbuja 5: Descripción breve. Luego un salto de línea y la URL del producto.
+   - Burbuja 5: DESCRIPCIÓN (breve y fiel). Luego un salto de línea. Nombre, precio, VARIANTES. Luego URL producto.
    - Burbuja 6: SOLO la imageUrl del producto 3 (si hay).
-   - Burbuja 7: Descripción breve. Luego un salto de línea y la URL del producto.
+   - Burbuja 7: DESCRIPCIÓN (breve y fiel). Luego un salto de línea. Nombre, precio, VARIANTES. Luego URL producto.
    - Burbuja 8: CTA Final con la URL general ({store_url}) en una línea nueva.
-6. NO inventes enlaces. Usa los devueltos por las tools.
+6. NO inventes enlaces. Usa los devueltos por las tools. NUNCA inventes descripción, usa la provista.
 7. USO DE CATALOGO: Tu variable {{STORE_CATALOG_KNOWLEDGE}} contiene las categorías y marcas reales.
    - Antes de llamar a `search_specific_products`, REVISA el catálogo.
    - Si el usuario pide "bolsos", mira que marcas de bolsos hay y busca por marca o categoría exacta (ej: `search_specific_products("Bolsos")`).
