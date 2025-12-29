@@ -889,6 +889,7 @@ async def get_agent_executable(tenant_phone: str = None):
     store_description = os.getenv("STORE_DESCRIPTION", "tienda de artículos de danza clásica y contemporánea")
     store_catalog = os.getenv("STORE_CATALOG_KNOWLEDGE", "")
     store_website = os.getenv("STORE_WEBSITE", "https://www.pointecoach.shop")
+    SHIPPING_PARTNERS = os.getenv("SHIPPING_PARTNERS", "Correo Argentino y principales logísticas")
     
     # 3. Resolve Credentials from Environment Variables
     # 3. Resolve Credentials from Environment Variables
@@ -953,10 +954,10 @@ REGLAS DE INTERACCIÓN (CHISTE VS TÉCNICO)
 
 1. **PROHIBIDO SER TÉCNICO:** No actúes como especialista en biomecánica ni hagas comparaciones técnicas profundas entre productos.
 2. **DERIVACIÓN OBLIGATORIA:** Si el usuario empieza a hacer preguntas técnicas, comparativas o complejas sobre productos (más allá de precio/stock/foto), USÁ LA TOOL `derivhumano` INMEDIATAMENTE. Avisale: "Para esas dudas más puntuales, te derivo con una especialista del equipo así te asesora bien."
-4. **CUIDADOS:** No des guías de "cómo cuidar tus zapatillas". Derivá o sé muy breve.
-5. **PEDIDOS:** Al informar estado de pedidos, sé ULTRA BREVE. No expliques procesos largos. Dato y listo.
-6. **FITTING:** Solo da argumentos breves del por qué: "Porque cada pie es único y así evitamos que te lastimes o gastes mal."
-7. **ENVÍOS:** Trabajamos con {SHIPPING_PARTNERS}. PROHIBIDO dar precios o tiempos de entrega. Tu única respuesta permitida es: "El costo y tiempo de envío se calculan al final de la compra según tu ubicación." No inventes otros datos.
+3. **CUIDADOS:** No des guías de "cómo cuidar tus zapatillas". Derivá o sé muy breve.
+4. **PEDIDOS:** Al informar estado de pedidos, sé ULTRA BREVE. No expliques procesos largos. Dato y listo.
+5. **FITTING:** Solo da argumentos breves del por qué: "Porque cada pie es único y así evitamos que te lastimes o gastes mal."
+6. **ENVÍOS:** Trabajamos con {SHIPPING_PARTNERS}. PROHIBIDO dar precios o tiempos de entrega. Tu única respuesta permitida es: "El costo y tiempo de envío se calculan al final de la compra según tu ubicación." No inventes otros datos.
 
 PRIMERA INTERACCIÓN (SALUDO CONTROLADO)
 * Si hay intención de búsqueda: SALUDO + TOOL + RESULTADOS en el mismo turno.
@@ -1043,9 +1044,7 @@ EXAMPLE JSON OUTPUT (Do not deviate):
 IMPORTANT: Output strict JSON only. No strings attached.
 """
     # Inject Knowledge
-    shipping_partners = os.getenv("SHIPPING_PARTNERS", "Correo Argentino y principales logísticas")
     sys_template = sys_template.replace("{STORE_CATALOG_KNOWLEDGE}", store_catalog if store_catalog else "No catalog data available")
-    sys_template = sys_template.replace("{SHIPPING_PARTNERS}", shipping_partners)
 
     # 5. Initialize Prompt and LLM
     prompt = ChatPromptTemplate.from_messages([
