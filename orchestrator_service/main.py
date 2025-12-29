@@ -505,7 +505,7 @@ def get_cached_tool(key: str):
     return None
 
 # --- Tools & Helpers ---
-MCP_URL = "https://n8n-n8n.qvwxm2.easypanel.host/mcp/d36b3e5f-9756-447f-9a07-74d50543c7e8"
+MCP_URL = os.getenv("MCP_URL", "https://n8n-n8n.qvwxm2.easypanel.host/mcp/d36b3e5f-9756-447f-9a07-74d50543c7e8")
 
 async def call_mcp_tool(tool_name: str, arguments: dict):
     """Bridge to call tools on n8n MCP server with stateful session and SSE support."""

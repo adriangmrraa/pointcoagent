@@ -350,8 +350,8 @@ TIENDANUBE_ACCESS_TOKEN = os.getenv("TIENDANUBE_ACCESS_TOKEN")
 TIENDANUBE_API_BASE = os.getenv("TIENDANUBE_API_BASE", "https://api.tiendanube.com/v1")
 YCLOUD_API_KEY = os.getenv("YCLOUD_API_KEY")
 YCLOUD_WEBHOOK_SECRET = os.getenv("YCLOUD_WEBHOOK_SECRET")
-WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://whatsapp_service:8000")
-TIENDANUBE_SERVICE_URL = os.getenv("TIENDANUBE_SERVICE_URL", "http://tiendanube_service:8001")
+WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://whatsapp_service:8002")
+TIENDANUBE_SERVICE_URL = os.getenv("TIENDANUBE_SERVICE_URL", "http://tiendanube_service:8000")
 
 # Function to get credentials with tenant-specific resolution
 async def get_credential_value(name: str, tenant_id: int = None, fallback_env: str = None) -> str:

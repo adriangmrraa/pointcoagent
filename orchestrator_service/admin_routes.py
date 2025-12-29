@@ -708,7 +708,7 @@ async def send_manual_message(data: dict):
         # We need to find the Whatsapp Service URL. 
         # In main.py it's not defined, usually it's env var or localhost if docker.
         # Let's assume http://whatsapp_service:8002 based on README
-        wa_url = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:8002")
+        wa_url = os.getenv("WHATSAPP_SERVICE_URL", "http://whatsapp_service:8002")
         
         try:
             res = await client.post(

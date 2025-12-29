@@ -7,7 +7,7 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
-const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || 'http://orchestrator_service:8000';
+const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_SERVICE_URL || process.env.ORCHESTRATOR_URL || 'http://orchestrator_service:8000';
 
 app.use(cors({
     origin: true,
