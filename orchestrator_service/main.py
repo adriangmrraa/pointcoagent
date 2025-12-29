@@ -674,17 +674,17 @@ def simplify_product(p):
     }
 
 async def call_tiendanube_api(endpoint: str, params: dict = None):
-    # Retrieve current tenant credentials from ContextVar OR Global Fallback (Env-First)
-    store_id = tenant_store_id.get() or GLOBAL_TN_STORE_ID
-    token = tenant_access_token.get() or GLOBAL_TN_ACCESS_TOKEN
+    # Retrieve credentials STRICTLY from Environment Variables (as requested)
+    store_id = GLOBAL_TN_STORE_ID
+    token = GLOBAL_TN_ACCESS_TOKEN
 
     if not store_id or not token:
         # Debug: Check if vars are actually empty
         logger.error("tiendanube_config_missing", 
                      store_id=store_id, 
                      has_token=bool(token),
-                     context_note="ContextVar might not have propagated to tool task")
-        return "Error: Store ID or Token not configured for this tenant. Please check database configuration for this phone number."
+                     context_note="Global Env Vars are missing. Check .env")
+        return "Error: Store ID or Token not configured in Environment Variables."
 
     headers = {
         "Authentication": f"bearer {token}",
