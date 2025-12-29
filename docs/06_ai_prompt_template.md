@@ -5,7 +5,7 @@ Copia y pega este prompt cuando necesites que otra IA (como Claude, GPT o Cursor
 ---
 
 ## Copiar desde aquí:
-
+    
 **OBJETIVO:** [DESCRIBE AQUÍ QUÉ QUIERES HACER, EJ: "Agregar una tool de stock" o "Corregir el formato de precios"]
 
 ### 🏗️ Contexto del Proyecto (Arquitectura Nexus v3)
