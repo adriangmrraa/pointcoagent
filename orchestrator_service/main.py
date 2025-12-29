@@ -890,7 +890,7 @@ async def get_agent_executable(tenant_phone: str = None):
     store_name = os.getenv("STORE_NAME", "Pointe Coach")
     store_description = os.getenv("STORE_DESCRIPTION", "tienda de artículos de danza clásica y contemporánea")
     store_catalog = os.getenv("STORE_CATALOG_KNOWLEDGE", "")
-    store_url = os.getenv("STORE_WEBSITE", "https://www.pointecoach.shop")
+    store_website = os.getenv("STORE_WEBSITE", "https://www.pointecoach.shop")
     
     # 3. Resolve Credentials from Environment Variables
     # 3. Resolve Credentials from Environment Variables
