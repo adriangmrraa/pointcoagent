@@ -1354,83 +1354,55 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
                      
         # Case C: String (maybe JSON string)
         elif isinstance(output, str):
+            # 1. Clean Markdown (Standardize)
+            cleaned = output.strip()
+            if cleaned.startswith("```json"): cleaned = cleaned[7:].split("```")[0].strip()
+            elif cleaned.startswith("```"): cleaned = cleaned[3:].split("```")[0].strip()
+            
             try:
-                # 1. Try Validating Parser first (Best for well-formed outputs)
-                try:
-                    # Clean markdown if present to help the parser
-                    cleaned_initial = output.strip()
-                    if cleaned_initial.startswith("```json"): cleaned_initial = cleaned_initial[7:].split("```")[0].strip()
-                    elif cleaned_initial.startswith("```"): cleaned_initial = cleaned_initial[3:].split("```")[0].strip()
-                    
-                    # Use the official LangChain parser
-                    parsed_obj = parser.parse(cleaned_initial)
-                    # If successful, we have an OrchestratorResponse object
-                    final_messages = parsed_obj.messages
-                    
-                except Exception:
-                    # Fallback to manual decoding if strict parser fails (e.g. partial json)
-                    # Multi-pass decoding to handle double-encoded JSON strings
-                    parsed = output
-                    for _ in range(3):
-                        if isinstance(parsed, str):
-                            cleaned = parsed.strip()
-                            # Clean Markdown if present
-                            if cleaned.startswith("```json"): cleaned = cleaned[7:].split("```")[0]
-                            if cleaned.startswith("```"): cleaned = cleaned[3:].split("```")[0]
-                            
-                            try:
-                                parsed = json.loads(cleaned)
-                            except json.JSONDecodeError:
-                                # Handle common LLM hallucinations like trailing backslashes/quotes
-                                # e.g. }\" or }\ 
-                                cleaned_harden = re.sub(r'\\"?\s*$', '', cleaned.strip())
-                                try:
-                                    parsed = json.loads(cleaned_harden)
-                                except:
-                                    # If direct parse fails, try regex extraction for embedded JSON
-                                    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-                                    if match:
-                                        try: parsed = json.loads(match.group(0))
-                                        except: break
-                                    else:
-                                        break
-                        else:
-                            break
-                    
-                    parsed_json = parsed
+                # 2. Try JSON Load (Robust)
+                parsed_json = json.loads(cleaned)
                 
-                # Recursively apply Case B logic
-                if isinstance(parsed_json, dict):
-                    if "messages" in parsed_json and isinstance(parsed_json["messages"], list):
-                        final_messages = []
-                        for m in parsed_json["messages"]:
-                            # Support both imageUrl and image_url, text or content
-                            txt = m.get("text") or m.get("content")
-                            img = m.get("imageUrl") or m.get("image_url")
-                            final_messages.append(OrchestratorMessage(text=txt, imageUrl=img))
-                    elif "message" in parsed_json:
-                        final_messages = [OrchestratorMessage(text=str(parsed_json["message"]))]
-                    elif "text" in parsed_json:
-                        final_messages = [OrchestratorMessage(text=str(parsed_json["text"]))]
-                    else:
-                        # If keys are unknown, try to use it as list or fallback
-                        final_messages = [OrchestratorMessage(text=json.dumps(parsed_json, ensure_ascii=False))]
+                # 3. Process as Dict
+                if isinstance(parsed_json, dict) and "messages" in parsed_json and isinstance(parsed_json["messages"], list):
+                    final_messages = []
+                    for m in parsed_json["messages"]:
+                        # Extract fields safely
+                        p_part = m.get("part")
+                        p_total = m.get("total")
+                        p_text = m.get("text")
+                        p_image = m.get("imageUrl") or m.get("image_url") # Handle common typo
+                        
+                        final_messages.append(OrchestratorMessage(
+                            part=p_part,
+                            total=p_total,
+                            text=p_text,
+                            imageUrl=p_image
+                        ))
+                elif isinstance(parsed_json, dict) and any(k in parsed_json for k in ["message", "response", "text"]):
+                     # Single message hallucination handling
+                     txt = parsed_json.get("message") or parsed_json.get("response") or parsed_json.get("text")
+                     final_messages = [OrchestratorMessage(text=str(txt) if txt else "", part=1, total=1)]
                 elif isinstance(parsed_json, list):
-                     # If the LLM returned a direct list of messages
+                     # Direct list handling
                      final_messages = []
                      for m in parsed_json:
                         if isinstance(m, dict):
-                            txt = m.get("text") or m.get("content")
-                            img = m.get("imageUrl") or m.get("image_url")
-                            final_messages.append(OrchestratorMessage(text=txt, imageUrl=img))
+                             final_messages.append(OrchestratorMessage(
+                                text=m.get("text"), 
+                                imageUrl=m.get("imageUrl") or m.get("image_url")
+                             ))
                 else:
-                    final_messages = [OrchestratorMessage(text=output)]
-            except Exception as parse_err:
-                logger.debug("output_not_json", error=str(parse_err))
-                # Fallback: if it looked like JSON but failed to parse deeply, send as text
-                # But if it starts with { "messages": ... } and failed, we should try a cleaner regex extraction maybe?
-                # For now, let's just return the raw text to be safe
-                final_messages = [OrchestratorMessage(text=output)]
+                    # JSON valid but structure unknown -> Send as text (debug indent)
+                    final_messages = [OrchestratorMessage(text=json.dumps(parsed_json, indent=2, ensure_ascii=False))]
+
+            except json.JSONDecodeError:
+                # 4. JSON Failed -> It's just text
+                final_messages = [OrchestratorMessage(text=cleaned)]
+            except Exception as e:
+                # 5. Validation/Logic Error -> Log and Fallback
+                logger.error("output_parsing_failed", error=str(e), output_sample=cleaned[:100])
+                final_messages = [OrchestratorMessage(text=cleaned)]
                 
         else:
             final_messages = [OrchestratorMessage(text=str(output))]
