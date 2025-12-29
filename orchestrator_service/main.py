@@ -788,27 +788,8 @@ async def derivhumano(reason: str, contact_name: Optional[str] = None, contact_p
     store_name = os.getenv("STORE_NAME", "Pointe Coach")
     handoff_msg = "Te derivo con una persona del equipo para ayudarte mejor 😊"
 
-    if tid:
-        # Try to pull from DB if tenant exists (for customizations), but ENV is already loaded as fallback
-        config = await db.pool.fetchrow("""
-            SELECT c.*, t.store_name 
-            FROM tenant_human_handoff_config c
-            JOIN tenants t ON c.tenant_id = t.id
-            WHERE c.tenant_id = $1
-        """, tid)
-        
-        if config and config['enabled']:
-             target_email = config['destination_email'] or target_email
-             h_smtp_host = config['smtp_host'] or h_smtp_host
-             h_smtp_port = config['smtp_port'] or h_smtp_port
-             h_smtp_user = config['smtp_username'] or h_smtp_user
-             if config['smtp_password_encrypted']:
-                 try:
-                     h_smtp_pass = decrypt_password(config['smtp_password_encrypted'])
-                 except: pass
-             h_smtp_sec = (config['smtp_security'] or h_smtp_sec).upper()
-             store_name = config['store_name'] or store_name
-             handoff_msg = config['handoff_message'] or handoff_msg
+    # STRICT ENV ONLY - No DB Lookup for Handoff Config
+    # If tid exists, we still rely on global env vars as per user request.
 
     if not target_email or not h_smtp_host or not h_smtp_user or not h_smtp_pass:
         logger.warning("handoff_config_incomplete", email=bool(target_email), host=bool(h_smtp_host))
@@ -900,11 +881,12 @@ async def get_agent_executable(tenant_phone: str = None):
     PRIORITY: Always use Environment Variables for this single-tenant deployment. 
     The DB is only used for chat memory consistency.
     """
-    # 1. Ensure DB connection (for memory, though this function doesn't use it directly, LLM might later)
+    # 1. Ensure DB connection (only for memory persistence later)
     if not db.pool:
         await db.connect()
 
-    # 2. Resolve Configuration from Environment Variables (SINGLE TENANT)
+    # 2. Resolve Configuration from Environment Variables (STRICT SINGLE TENANT)
+    # NO DB LOOKUP for settings.
     store_name = os.getenv("STORE_NAME", "Pointe Coach")
     store_description = os.getenv("STORE_DESCRIPTION", "tienda de artículos de danza clásica y contemporánea")
     store_catalog = os.getenv("STORE_CATALOG_KNOWLEDGE", "")
