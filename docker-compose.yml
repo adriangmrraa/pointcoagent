@@ -39,6 +39,7 @@ services:
       - POSTGRES_DSN=${POSTGRES_DSN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s

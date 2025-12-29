@@ -61,6 +61,16 @@ GLOBAL_STORE_DESCRIPTION = os.getenv("GLOBAL_STORE_DESCRIPTION")
 GLOBAL_CATALOG_KNOWLEDGE = os.getenv("GLOBAL_CATALOG_KNOWLEDGE")
 GLOBAL_SYSTEM_PROMPT = os.getenv("GLOBAL_SYSTEM_PROMPT")
 
+# CORS Configuration
+CORS_ALLOWED_ORIGINS_RAW = os.getenv("CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS = [
+    origin.strip() for origin in CORS_ALLOWED_ORIGINS_RAW.split(",") if origin.strip()
+] or [
+    "https://docker-platform-ui.yn8wow.easypanel.host",
+    "http://localhost:3000",
+    "http://localhost:8000"
+]
+
 if not OPENAI_API_KEY:
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
     if not OPENAI_API_KEY:
@@ -421,12 +431,7 @@ app = FastAPI(
 # This MUST be the first middleware added
 app.add_middleware(
     CORSMiddleware,
-    # Explicitly list the frontend origin
-    allow_origins=[
-        "https://docker-platform-ui.yn8wow.easypanel.host", 
-        "http://localhost:3000",
-        "http://localhost:8000"
-    ],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
