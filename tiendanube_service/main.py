@@ -12,7 +12,7 @@ load_dotenv()
 TIENDANUBE_API_KEY = os.getenv("TIENDANUBE_API_KEY")
 TIENDANUBE_USER_AGENT = os.getenv("TIENDANUBE_USER_AGENT", "Langchain-Agent (lala.com)")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
-TIENDANUBE_STORE_ID = "6873259"
+TIENDANUBE_STORE_ID = os.getenv("TIENDANUBE_STORE_ID", "6873259")
 
 import structlog
 import time

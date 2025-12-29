@@ -339,7 +339,7 @@ STORE_CATALOG_KNOWLEDGE = os.getenv("STORE_CATALOG_KNOWLEDGE", """
 """)
 
 # Initialize config - fallback to env vars
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin-secret-99") # Secret for frontend auth
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") # Secret for frontend auth
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 HMAC_SHARED_SECRET = os.getenv("HMAC_SHARED_SECRET")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
@@ -2318,7 +2318,7 @@ async def chat(event: InboundChatEvent, x_internal_token: Optional[str] = Header
         t_store_description = STORE_DESCRIPTION
         t_store_website = STORE_WEBSITE
         t_store_catalog = STORE_CATALOG_KNOWLEDGE
-        t_tn_store_id = os.getenv("TIENDANUBE_STORE_ID", "6873259")
+        t_tn_store_id = os.getenv("TIENDANUBE_STORE_ID")
         t_tn_token = await get_credential_value("TIENDANUBE_ACCESS_TOKEN", tenant_id, "TIENDANUBE_ACCESS_TOKEN")
         t_openai_key = await get_credential_value("OPENAI_API_KEY", tenant_id, "OPENAI_API_KEY")
     else:
@@ -2328,7 +2328,7 @@ async def chat(event: InboundChatEvent, x_internal_token: Optional[str] = Header
         t_store_description = tenant.get("store_description") or STORE_DESCRIPTION
         t_store_website = tenant.get("store_website") or STORE_WEBSITE
         t_store_catalog = tenant.get("store_catalog_knowledge") or STORE_CATALOG_KNOWLEDGE
-        t_tn_store_id = tenant.get("tiendanube_store_id") or os.getenv("TIENDANUBE_STORE_ID", "6873259")
+        t_tn_store_id = tenant.get("tiendanube_store_id") or os.getenv("TIENDANUBE_STORE_ID")
         t_tn_token = await get_credential_value("TIENDANUBE_ACCESS_TOKEN", tenant_id, "TIENDANUBE_ACCESS_TOKEN")
         t_openai_key = await get_credential_value("OPENAI_API_KEY", tenant_id, "OPENAI_API_KEY")
 

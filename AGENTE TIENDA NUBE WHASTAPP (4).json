@@ -10,7 +10,7 @@
           "parameters": [
             {
               "name": "X-API-Key",
-              "value": "4573f1712ad23a999611fcc2253a4b7c"
+              "value": "={{ $env.YCLOUD_API_KEY }}"
             }
           ]
         },
@@ -37,7 +37,7 @@
           "parameters": [
             {
               "name": "X-API-Key",
-              "value": "4573f1712ad23a999611fcc2253a4b7c"
+              "value": "={{ $env.YCLOUD_API_KEY }}"
             }
           ]
         },

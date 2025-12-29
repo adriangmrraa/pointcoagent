@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || detectApiBase();
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || "admin-secret-99";
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || "";
 
 function detectApiBase() {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {

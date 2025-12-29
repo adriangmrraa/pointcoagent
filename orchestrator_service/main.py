@@ -103,15 +103,6 @@ async def lifespan(app: FastAPI):
         await db.connect()
         logger.info("db_connected")
         
-        # Sync Environment Tenants
-        try:
-            await sync_environment()
-            logger.info("environment_synced")
-        except Exception as e:
-            logger.error("environment_sync_failed", error=str(e))
-        
-        # --- Auto-Migration for EasyPanel ---
-        # Since the db/ folder isn't copied to the container, we inline the critical schema here.
         # Migration Steps - Executed Sequentially
         migration_steps = [
             # 1. Tenants Table
@@ -398,6 +389,12 @@ CATALOGO:
         
         logger.info("db_migrations_applied")
         
+        # Sync Environment Tenants - Called AFTER migrations to ensure tables exist
+        try:
+            await sync_environment()
+            logger.info("environment_synced")
+        except Exception as e:
+            logger.error("environment_sync_failed", error=str(e))
     except Exception as e:
         logger.error("startup_critical_error", error=str(e), dsn_preview=POSTGRES_DSN[:15] if POSTGRES_DSN else "None")
         # Optimization: We let it start, but health checks will fail.
@@ -1073,12 +1070,22 @@ ACCIONES OBLIGATORIAS:
     ]).partial(format_instructions=parser.get_format_instructions())
 
     # 3. Create Agent
-    if not OPENAI_API_KEY:
+    # DYNAMIC CREDENTIALS: Prefer DB over Env for OpenAI Key
+    effective_api_key = OPENAI_API_KEY
+    try:
+        cred_row = await db.pool.fetchrow("SELECT value FROM credentials WHERE name = 'OPENAI_API_KEY' AND scope = 'global'")
+        if cred_row and cred_row['value']:
+            effective_api_key = cred_row['value']
+            # logger.info("using_openai_key_from_db")
+    except Exception as e:
+        logger.warning("failed_to_fetch_openai_key_from_db", error=str(e))
+
+    if not effective_api_key:
         raise ValueError("OPENAI_API_KEY missing")
 
     llm = ChatOpenAI(
         model="gpt-4o-mini",
-        api_key=OPENAI_API_KEY, 
+        api_key=effective_api_key, 
         temperature=0, 
         max_tokens=2000
     )
@@ -1204,9 +1211,25 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             is_locked = True
     else:
         # Create new conversation
-        # Need tenant_id. Resolve from tenants table or default
+        # Resolve Tenant ID robustly
         tenant_row = await db.pool.fetchrow("SELECT id FROM tenants WHERE bot_phone_number = $1", event.to_number)
-        tenant_id = tenant_row['id'] if tenant_row else 1 
+        
+        if not tenant_row:
+            # Fallback 1: Try prefix removal/addition
+            clean_to = event.to_number.strip().replace("+", "") if event.to_number else ""
+            tenant_row = await db.pool.fetchrow("SELECT id FROM tenants WHERE bot_phone_number LIKE $1", f"%{clean_to[-8:]}")
+            
+        if not tenant_row:
+            # Fallback 2: Grab the first available tenant (common for single-tenant users)
+            tenant_row = await db.pool.fetchrow("SELECT id FROM tenants ORDER BY id ASC LIMIT 1")
+            
+        if not tenant_row:
+             logger.error("no_tenant_found_and_db_empty", to_number=event.to_number)
+             # At this point we are stuck. This usually means sync_environment failed or env vars are missing.
+             raise HTTPException(status_code=500, detail="Tenant not configured in database. Verify BOT_PHONE_NUMBER env var.")
+        
+        tenant_id = tenant_row['id']
+        logger.info("resolved_tenant", tenant_id=tenant_id, to_number=event.to_number)
         
         new_conv_id = str(uuid.uuid4())
         conv_id = await db.pool.fetchval("""

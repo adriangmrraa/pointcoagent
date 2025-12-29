@@ -9,7 +9,7 @@ import httpx
 from db import db
 
 # Configuration
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin-secret-99")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -127,12 +127,17 @@ async def sync_environment():
         val = os.getenv(env_var)
         if val:
             # Atomic upsert using the unique_name_scope constraint
-            await db.pool.execute("""
-                INSERT INTO credentials (name, value, category, scope, description)
-                VALUES ($1, $2, $3, 'global', $4)
-                ON CONFLICT ON CONSTRAINT unique_name_scope
-                DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-            """, env_var, val, category, f"{desc} (Auto-detected from ENV)")
+            try:
+                await db.pool.execute("""
+                    INSERT INTO credentials (name, value, category, scope, description)
+                    VALUES ($1, $2, $3, 'global', $4)
+                    ON CONFLICT ON CONSTRAINT unique_name_scope
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """, env_var, val, category, f"{desc} (Auto-detected from ENV)")
+                # logger.info("credential_synced", name=env_var) # Structlog might not be global here, use print for startup visibility
+                print(f"INFO: Synced credential {env_var} to DB (global)")
+            except Exception as e:
+                print(f"WARN: Failed to sync credential {env_var}: {str(e)}")
 
 # --- Endpoints ---
 
@@ -715,7 +720,7 @@ async def send_manual_message(data: dict):
                 f"{wa_url}/messages/send",
                 json={"to": to_number, "text": msg_content},
                 headers={
-                    "X-Internal-Token": os.getenv("INTERNAL_API_TOKEN", "internal-secret"),
+                    "X-Internal-Token": os.getenv("INTERNAL_API_TOKEN"),
                     "X-Correlation-Id": correlation_id
                 },
                 timeout=10.0
@@ -778,7 +783,7 @@ async def update_credential(id: int, cred: CredentialModel):
 
 @router.get("/internal/credentials/{name}")
 async def get_internal_credential(name: str, x_internal_token: str = Header(None)):
-    if x_internal_token != os.getenv("INTERNAL_API_TOKEN", "internal-secret"):
+    if x_internal_token != os.getenv("INTERNAL_API_TOKEN"):
          raise HTTPException(status_code=401, detail="Unauthorized internal call")
     
     # 1. Check DB

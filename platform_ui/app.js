@@ -32,7 +32,7 @@ function detectApiBase() {
 }
 
 const API_BASE = detectApiBase();
-const ADMIN_TOKEN = window.ADMIN_TOKEN || "admin-secret-99"; // ← Asegúrate de que coincida con tu env
+const ADMIN_TOKEN = window.ADMIN_TOKEN || ""; // ← Asegúrate de que coincida con tu env
 
 console.log('API_BASE detected:', API_BASE);
 console.log('Current location:', window.location.href);

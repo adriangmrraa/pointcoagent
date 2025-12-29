@@ -39,7 +39,7 @@ async def get_config(name: str, default: str = None) -> str:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{ORCHESTRATOR_URL}/admin/internal/credentials/{name}",
-                headers={"X-Internal-Token": INTERNAL_API_TOKEN or "internal-secret"},
+                headers={"X-Internal-Token": INTERNAL_API_TOKEN},
                 timeout=5.0
             )
             if resp.status_code == 200:
@@ -56,7 +56,7 @@ async def get_config(name: str, default: str = None) -> str:
 YCLOUD_API_KEY = os.getenv("YCLOUD_API_KEY")
 YCLOUD_WEBHOOK_SECRET = os.getenv("YCLOUD_WEBHOOK_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN") or "internal-secret"
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator_service:8000")
 
@@ -428,7 +428,7 @@ async def ycloud_webhook(request: Request):
 async def send_message(message: SendMessage, request: Request):
     """Internal endpoint for sending manual messages from orchestrator."""
     token = request.headers.get("X-Internal-Token")
-    if token != (INTERNAL_API_TOKEN or "internal-secret"):
+    if token != INTERNAL_API_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
     correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())

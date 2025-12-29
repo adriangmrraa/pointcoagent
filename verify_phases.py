@@ -7,8 +7,8 @@ import uuid
 
 # Configuration
 WHATSAPP_SERVICE_URL = "http://localhost:8002"
-YCLOUD_WEBHOOK_SECRET = "test_secret"  # Make sure this matches your .env or what you've set
-INTERNAL_API_TOKEN = "test_token"
+YCLOUD_WEBHOOK_SECRET = os.getenv("YCLOUD_WEBHOOK_SECRET", "test_secret")
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "test_token")
 
 def generate_signature(body, secret):
     t = str(int(time.time()))
