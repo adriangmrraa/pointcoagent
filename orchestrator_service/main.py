@@ -1003,11 +1003,12 @@ CONOCIMIENTO DE TIENDA:
 FORMAT INSTRUCTIONS:
 {{format_instructions}}
 
-EXAMPLE JSON OUTPUT (Do not deviate):
+EXAMPLE JSON OUTPUT (Do not deviate from split bubbles):
 {{{{
     "messages": [
-        {{{{ "part": 1, "total": 2, "text": "Hola, te muestro opciones:", "imageUrl": null }}}},
-        {{{{ "part": 2, "total": 2, "text": "Zapatillas Grishko 2007\n$55000\nVariantes: 4, 5, 6\nIdeales para pie griego.\nhttps://...", "imageUrl": "https://dcdn-us..." }}}}
+        {{{{ "part": 1, "total": 3, "text": "Hola, te muestro opciones:", "imageUrl": null }}}},
+        {{{{ "part": 2, "total": 3, "text": null, "imageUrl": "https://dcdn-us..." }}}},
+        {{{{ "part": 3, "total": 3, "text": "Zapatillas Grishko 2007\n$55000\nVariantes: 4, 5, 6\nIdeales para pie griego.\nhttps://...", "imageUrl": null }}}}
     ]
 }}}}
 
@@ -1031,7 +1032,8 @@ IMPORTANT: Output strict JSON only. Do not wrap in markdown '```json' blocks. No
         model="gpt-4o-mini",
         api_key=current_openai_key, 
         temperature=0, 
-        max_tokens=2000
+        max_tokens=2000,
+        model_kwargs={"response_format": {"type": "json_object"}}
     )
     
     agent_def = create_openai_functions_agent(llm, tools, prompt)
