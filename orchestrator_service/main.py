@@ -1268,7 +1268,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     
     # Distributed Lock (Prevent Race Conditions per number)
     lock_key = f"lock:{event.from_number}"
-    lock = redis_client.lock(lock_key, timeout=20)
+    lock = redis_client.lock(lock_key, timeout=45) # Increased to 45s
     acquired = False
     
     # Early check for lock availability
@@ -1434,7 +1434,13 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
         await db.mark_inbound_failed(event.provider, event.provider_message_id, str(e))
         return OrchestratorResult(status="error", send=False, meta={"error": str(e)})
     finally:
-        if acquired: lock.release()
+        if acquired:
+            try:
+                lock.release()
+            except redis.exceptions.LockNotOwnedError:
+                logger.warning("lock_release_failed_not_owned", from_number=event.from_number)
+            except Exception as e:
+                logger.error("lock_release_error", error=str(e))
 
 # --- CORS CONFIGURATION (OUTERMOST LAYER) ---
 # Middlewares in FastAPI are processed in reverse order of addition.
