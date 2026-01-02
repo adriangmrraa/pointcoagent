@@ -713,7 +713,9 @@ async def call_tiendanube_api(endpoint: str, params: dict = None):
 
 @tool
 async def search_specific_products(q: str):
-    """SEARCH for specific products by name, category, or brand. REQUIRED for queries like 'medias', 'zapatillas', 'puntas', 'grishko'. Input 'q' is the keyword."""
+    """SEARCH for specific products by name, category, or brand. REQUIRED for queries like 'medias', 'zapatillas', 'puntas', 'grishko'. 
+    IMPORTANT: Use normalized terms from the Category Router (e.g., use 'Leotardo' instead of 'malla' or 'body'). 
+    Input 'q' is the keyword."""
     cache_key = f"productsq:{q}"
     cached = get_cached_tool(cache_key)
     if cached: return cached
@@ -925,11 +927,14 @@ async def get_agent_executable(tenant_phone: str = None, customer_name: str = No
 * Si hay intención de “puntas” o “mediapuntas” y la consulta es general, mostrar opciones del catálogo (máx 3).
 
 ## ESTRATEGIA DE QUERY Y FALLBACK (SMART SAFETY) - V7
-* **LIMPIEZA DE PALABRAS:** Al usar tools, eliminá adjetivos subjetivos (ej: "lindas", "baratas", "mejores", "par de", "alguna", "busco"). Buscá solo por SUSTANTIVOS, CATEGORÍAS (Router) y MARCAS/MODELOS.
-* **ROUTER DE CATEGORÍA:** Si el usuario usa un sinónimo, convertilo a la palabra clave del ROUTER (ej: "cancán" -> "Medias").
+* **ESTRATEGIA DE QUERY Y MAPEO (DICCIONARIO):** 
+    1. Antes de usar una tool, compará las palabras del usuario con el **DICCIONARIO DE SINÓNIMOS**.
+    2. Si hay coincidencia, traducí el término del usuario a la **CATEGORÍA PRINCIPAL** (ej: "malla" -> "Leotardos").
+    3. **SIEMPRE** buscá usando la Categoría Principal para asegurar resultados en Tienda Nube.
+    4. Limpiá adjetivos (lindas, baratas) y usá solo SUSTANTIVOS, CATEGORÍAS (Router) y MARCAS/MODELOS.
 * **REGLA DE FALLBACK (SMART RETRY):** Si buscás algo específico (ej: "media punta beige") y la tool devuelve **0 resultados**:
     *   **ESTÁ PROHIBIDO RENDIRSE:** Tu deber es buscar inmediatamente una alternativa más amplia en el mismo turno.
-    *   **ACCIÓN:** Ejecutá `search_specific_products` solo con la categoría (ej: "media punta") O usá `browse_general_storefront`.
+    *   **ACCIÓN:** Ejecutá `search_specific_products` solo con la categoría principal (ej: "media punta") O usá `browse_general_storefront`.
     *   **RESPUESTA:** "No encontré ese color/modelo exacto, pero mirá estas opciones que sí tenemos en esa categoría:".
 
 ## REGLA DE VERACIDAD (CRÍTICA)
@@ -940,10 +945,10 @@ async def get_agent_executable(tenant_phone: str = None, customer_name: str = No
 
 ## GATE ABSOLUTO DE CATÁLOGO (INNEGOCIABLE)
 
-* **VALIDATION FIRST:** Antes de buscar, identificá si el usuario pide una categoría del Mapa de Categorías.
-* **RELEVANCIA ESTRICTA (CRÍTICO):** Si el usuario pide una categoría específica (ej: "Medias"), está terminantemente PROHIBIDO mostrar productos de otra categoría (ej: "Zapatillas"). Solo mostrá lo que se pidió.
-* **Consultas vagas/banales:** Si el usuario pregunta de forma general ("¿Qué tienen?", "Mostrame algo lindo", "No sé qué elegir"), no repreguntes. Ejecutá `browse_general_storefront` inmediatamente y mostrá 3 opciones reales del catálogo.
-* **Sinónimos:** Mapeá "cancán" -> buscar en "Medias"; "malla" -> buscar en "Leotardos" o "Medias" según contexto. Si el término no es exacto, usá la categoría lógica.
+* **VALIDATION FIRST:** Antes de buscar, identificá si el usuario pide una categoría del Diccionario de Sinónimos.
+* **RELEVANCIA ESTRICTA (CRÍTICO):** Si el usuario pide una categoría específica (ej: "Medias"), está terminantemente PROHIBIDO mostrar productos de otra categoría. Solo mostrá lo que se pidió tras el mapeo.
+* **Consultas vagas/banales:** Si el usuario pregunta de forma general ("¿Qué tienen?", "Mostrame algo lindo"), no repreguntes. Ejecutá `browse_general_storefront` inmediatamente y mostrá 3 opciones reales del catálogo.
+* **DICCIONARIO OBLIGATORIO:** Mapeá CUALQUIER sinónimo a su categoría base antes de llamar a la tool. Nunca busques por el término informal del usuario si existe traducción.
 * Está prohibido enviar productos o precios si NO hubo tool ejecutada con éxito en ese turno.
 
 ## PARCHE CRÍTICO — ANTI “RESPUESTA SIN TOOL”
@@ -993,14 +998,20 @@ async def get_agent_executable(tenant_phone: str = None, customer_name: str = No
 5. `orders`: estado pedido (q=número).
 6. `derivhumano`: derivación.
 
-## ROUTER DE CATEGORÍA (Mapeo Estricto)
+## DICCIONARIO DE SINÓNIMOS Y CATEGORÍAS (ROUTER)
 
-* ZAPATILLAS DE PUNTA: “puntas”, “pointe”, “zapatillas de pointe”
-* MEDIA PUNTA: “media punta”, “ballet”, “slippers”, “zapatillas de tela”
-* MEDIAS / CANCÁN: “medias”, “panty”, “socks”, “convertibles”, “cancán”, “cancanes”
-* ACCESORIOS: “punteras”, “cintas”, “elásticos”, “protector”, “separadores”, “metatarsianas”
-* BOLSOS: “bolso”, “mochila”, “bag”, “bolsa”
-* LEOTARDOS / MALLAS: “leotardo”, “maillot”, “malla”, “body”
+* **ZAPATILLAS DE PUNTA:** puntas, zapatillas de punta, zapatillas de pointe, pointe, pointe shoes, zapatos de punta, zapatillas de ballet de punta, zapatillas de puntas, puntas de ballet, zapatos de ballet de punta, zapatillas duras, puntas duras, puntas profesionales, calzado de punta, punta profesional, zapatillas de danza de punta
+* **MEDIA PUNTA:** media punta, medias puntas, zapatillas de media punta, zapatillas de medio punto, zapatillas media-punta, ballet slippers, zapatillas de ballet, zapatillas de ensayo, zapatillas flexibles, zapatillas de tela, zapatillas sin punta, zapatillas blandas de danza, zapatillas de práctica, zapatillas de medio, slippers de ballet
+* **MEDIAS:** medias, medias de ballet, medias de danza, medias convertibles, convertible socks, socks de danza, medias poliamida, medias de contemporáneo, medias de patín, medias largas, medias finas, panty, pantymedia, medias sin pie, media para danza
+* **BOLSOS:** bolso, bolso de danza, bolso de ballet, bolso para zapatillas, bolso grande, bolso turístico, mochila, mochila de danza, mochila para ballet, bolsa de malla, bolsa de red, bolsa deportiva, bag de danza
+* **LEOTARDOS:** malla, mallas, leotardo, leotard, maillot, body, malla de ballet, body de danza, enterito, enteriza, malla entera, leotardo clásico, leotardo de adulto, leotardo de nena, malla de entrenamiento, traje de danza, vestido, vestiditos, enteritos
+* **PUNTERAS:** punteras, punteras de gel, punteras de moleskin, gel pads, almohadillas para puntas, protectores de dedos, pads de punteras, protecciones para puntas, cubre dedos
+* **PROTECTORES DE PUNTAS:** protectores de puntas, toppers de puntas, protectores de punta de gel, protectores de gel para puntas
+* **METATARSINAS:** metatarsianas, almohadillas metatarsianas, pads metatarsianas, gel metatarsianas, protección metatarsal
+* **ENDURECEDOR PARA PUNTAS:** endurecedor para puntas, hardener, hardener para zapatillas, reforzador de puntas
+* **CINTAS DE SATÉN Y ELASTIZADAS:** cintas, cintas de satén, cintas elásticas, cintas elásticas para zapatillas, satén ballet ribbons, cintas para media punta
+* **ELÁSTICOS:** elásticos, elásticos de zapatillas, bandas elásticos, elásticos cruzados, gomas elásticos para zapatillas
+* **BOLSA DE RED:** bolsa de red, bolsa de malla, mochila de malla, bolsa transpirable de danza
 
 ## REGLA DE RESULTADOS (CANTIDAD)
 
