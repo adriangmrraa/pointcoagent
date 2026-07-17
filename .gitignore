@@ -1,0 +1,23 @@
+# Secretos - NUNCA versionar
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Datos locales de evals (conversaciones reales = datos personales)
+evals/data/
+
+# Sistema
+.DS_Store
+*.log

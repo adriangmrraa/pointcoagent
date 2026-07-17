@@ -205,7 +205,7 @@
           "parameters": [
             {
               "name": "Authentication",
-              "value": "bearer ddfd19400d3236fd4524fff6f0689c5c6748806f"
+              "value": "bearer REEMPLAZAR_CON_TOKEN_TIENDANUBE"
             },
             {
               "name": "User-Agent",
