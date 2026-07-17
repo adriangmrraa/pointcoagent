@@ -26,6 +26,8 @@ tenant_access_token: ContextVar[Optional[str]] = ContextVar("tenant_access_token
 current_tenant_id: ContextVar[Optional[int]] = ContextVar("current_tenant_id", default=None)
 current_conversation_id: ContextVar[Optional[uuid.UUID]] = ContextVar("current_conversation_id", default=None)
 current_customer_phone: ContextVar[Optional[str]] = ContextVar("current_customer_phone", default=None)
+# URLs devueltas por tools en el turno actual: son las ÚNICAS que el bot puede enviar.
+current_turn_allowed_urls: ContextVar[Optional[set]] = ContextVar("current_turn_allowed_urls", default=None)
 
 # Initialize earlys
 load_dotenv()
@@ -46,6 +48,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 
 from db import db
 from catalog import is_product_available, available_variant_values
+from guardrails import collect_urls, filter_outbound_messages, FALLBACK_TEXT
 
 # Configuration & Environment
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -356,38 +359,7 @@ async def lifespan(app: FastAPI):
             END $$;
             """,
             
-            # 13. Update Prompt
-            """
-            UPDATE tenants 
-            SET system_prompt_template = 'Eres el asistente virtual de {STORE_NAME}.
 
-REGLAS CRÍTICAS DE RESPUESTA:
-1. SALIDA: Responde SIEMPRE con el formato JSON de OrchestratorResponse (una lista de objetos "messages").
-2. ESTILO: Tus respuestas deben ser naturales y amigables. El contenido de los mensajes NO debe parecer datos crudos.
-3. FORMATO DE LINKS: NUNCA uses formato markdown [texto](url). Escribe la URL completa y limpia en su propia línea nueva.
-4. SECUENCIA DE BURBUJAS (8 pasos para productos):
-   - Burbuja 1: Introducción amigable (ej: "Saluda si te han saludado, luego di Te muestro opciones de bolsos disponibles...").
-   - Burbuja 2: SOLO la imageUrl del producto 1.
-   - Burbuja 3: Nombre, precio, VARIANTES (Colores/Talles resumidos en misma línea). Luego un salto de línea y la URL del producto.
-   - Burbuja 4: SOLO la imageUrl del producto 2.
-   - Burbuja 5: DESCRIPCIÓN (breve y fiel). Luego un salto de línea. Nombre, precio, VARIANTES. Luego URL producto.
-   - Burbuja 6: SOLO la imageUrl del producto 3 (si hay).
-   - Burbuja 7: DESCRIPCIÓN (breve y fiel). Luego un salto de línea. Nombre, precio, VARIANTES. Luego URL producto.
-   - Burbuja 8: CTA Final con la URL general ({STORE_URL}) en una línea nueva o invitación a Fitting si son puntas.
-5. FITTING: Si el usuario pregunta por "zapatillas de punta" por primera vez, recomienda SIEMPRE un fitting en la Burbuja 8.
-6. NO inventes enlaces. Usa los devueltos por las tools. NUNCA inventes descripción, usa la provista.
-7. USO DE CATALOGO: Tu variable {STORE_CATALOG_KNOWLEDGE} contiene las categorías y marcas reales.
-   - Antes de llamar a `search_specific_products`, REVISA el catálogo.
-   - Si el usuario pide "bolsos", mira que marcas de bolsos hay y busca por marca o categoría exacta (ej: `search_specific_products("Bolsos")`).
-   - Evita `browse_general_storefront` si hay un término de búsqueda claro.
-   - BÚSQUEDA INTELIGENTE: Si piden "Malla Negra", busca solo "Malla" (o "Leotardo") y filtra vos mismo si hay variantes en negro. NO busques "Malla Negra" directo.
-GATE: Usa `search_specific_products` SIEMPRE que pidan algo específico.
-CONTEXTO DE LA TIENDA:
-{STORE_DESCRIPTION}
-CATALOGO:
-{STORE_CATALOG_KNOWLEDGE}'
-            WHERE store_name = 'Pointe Coach' OR id = 39;
-            """
         ]
         
         # Execute migration steps sequentially
@@ -665,6 +637,15 @@ def simplify_product(p):
         "imageUrl": image_url
     }
 
+def _register_turn_urls(obj):
+    """Registra las URLs devueltas por una tool como permitidas para este turno."""
+    try:
+        urls = current_turn_allowed_urls.get()
+        if urls is not None:
+            urls.update(collect_urls(obj))
+    except Exception as e:
+        logger.error("turn_url_registry_error", error=str(e))
+
 async def call_tiendanube_api(endpoint: str, params: dict = None):
     # Retrieve credentials STRICTLY from Environment Variables (as requested)
     store_id = GLOBAL_TN_STORE_ID
@@ -692,12 +673,15 @@ async def call_tiendanube_api(endpoint: str, params: dict = None):
                 return f"Error HTTP {response.status_code}: {response.text}"
             
             data = response.json()
-            
+
             # Auto-simplify if it's a list of products
             # Filtro de disponibilidad: productos sin stock o despublicados no llegan al modelo.
             if isinstance(data, list) and "/products" in endpoint:
-                return [simplify_product(p) for p in data if is_product_available(p)]
-                
+                simplified = [simplify_product(p) for p in data if is_product_available(p)]
+                _register_turn_urls(simplified)
+                return simplified
+
+            _register_turn_urls(data)
             return data
     except Exception as e:
         logger.error("tiendanube_request_exception", error=str(e))
@@ -743,7 +727,9 @@ async def browse_general_storefront():
 @tool
 async def cupones_list():
     """List active coupons and discounts from Tienda Nube via n8n MCP."""
-    return await call_mcp_tool("cupones_list", {})
+    result = await call_mcp_tool("cupones_list", {})
+    _register_turn_urls(result)
+    return result
 
 @tool
 async def orders(q: str):
@@ -1395,6 +1381,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     # Set Conversation Context for Tools
     current_conversation_id.set(conv_id)
     current_customer_phone.set(event.from_number)
+    current_turn_allowed_urls.set(set())
     
     # Distributed Lock (Prevent Race Conditions per number)
     lock_key = f"lock:{event.from_number}"
@@ -1527,6 +1514,19 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             final_messages = [OrchestratorMessage(text=str(output))]
 
 
+        # --- GUARDRAIL PRE-ENVÍO (determinístico, no depende del prompt) ---
+        # Solo pueden salir links/imágenes devueltos por tools EN ESTE turno (+ home).
+        allowed_urls = current_turn_allowed_urls.get() or set()
+        raw_msgs = [{"part": m.part, "total": m.total, "text": m.text, "imageUrl": m.imageUrl} for m in final_messages]
+        safe_msgs, blocked_reasons = filter_outbound_messages(raw_msgs, allowed_urls, GLOBAL_STORE_WEBSITE)
+        if blocked_reasons:
+            logger.warning("guardrail_blocked_content", blocked=blocked_reasons[:5], conv_id=str(conv_id))
+            await log_db("warn", "guardrail_blocked", f"{len(blocked_reasons)} bloqueo(s) en respuesta saliente", {"blocked": blocked_reasons[:5], "correlation_id": correlation_id})
+        if not safe_msgs and raw_msgs:
+            # Toda la respuesta era inverificable: fallback honesto antes que inventar.
+            safe_msgs = [{"part": 1, "total": 1, "text": FALLBACK_TEXT, "imageUrl": None}]
+        final_messages = [OrchestratorMessage(**m) for m in safe_msgs]
+
         # Store Assistant Response
         raw_output_str = ""
         if isinstance(output, str):
@@ -1560,8 +1560,10 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
         )
             
     except Exception as e:
-        log.error("unexpected_error", error=str(e))
-        await db.mark_inbound_failed(event.provider, event.provider_message_id, str(e))
+        # Nota: antes este bloque usaba `log` (inexistente) y una tabla que puede no existir,
+        # con lo cual el error real quedaba enmascarado por un NameError.
+        logger.error("chat_unexpected_error", error=str(e), from_number=event.from_number)
+        await log_db("error", "chat_unexpected_error", str(e), {"correlation_id": correlation_id})
         return OrchestratorResult(status="error", send=False, meta={"error": str(e)})
     finally:
         if acquired:
