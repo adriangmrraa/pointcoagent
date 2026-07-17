@@ -17,6 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from ycloud_client import YCloudClient
+from sequence_planner import plan_send_actions
 
 # Initialize config
 load_dotenv()
@@ -60,6 +61,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator_service:8000")
+
+# Tiempos del bot (ajustables desde EasyPanel sin tocar código, en segundos)
+DEBOUNCE_SECONDS = int(os.getenv("DEBOUNCE_SECONDS", "5"))
+DELAY_IMAGE_SECONDS = float(os.getenv("DELAY_IMAGE_SECONDS", "1.5"))
+DELAY_TEXT_SECONDS = float(os.getenv("DELAY_TEXT_SECONDS", "0.8"))
+DELAY_BETWEEN_BUBBLES_SECONDS = float(os.getenv("DELAY_BETWEEN_BUBBLES_SECONDS", "1.0"))
 
 # Initialize structlog
 structlog.configure(
@@ -175,54 +182,48 @@ async def transcribe_audio(audio_url: str, correlation_id: str) -> Optional[str]
         logger.error("transcription_failed", error=str(e), correlation_id=correlation_id)
         return None
 
+async def _notify_typing(inbound_id: str, business_number: str, correlation_id: str):
+    """Marca leído y muestra 'escribiendo...' apenas llega el mensaje del usuario,
+    para que la espera del procesamiento se sienta más corta."""
+    try:
+        v_ycloud = await get_config("YCLOUD_API_KEY", YCLOUD_API_KEY)
+        if not v_ycloud or not inbound_id:
+            return
+        client = YCloudClient(v_ycloud, business_number)
+        await client.mark_as_read(inbound_id, correlation_id)
+        await client.typing_indicator(inbound_id, correlation_id)
+    except Exception as e:
+        logger.warning("typing_on_receipt_failed", error=str(e), correlation_id=correlation_id)
+
 async def send_sequence(messages: List[OrchestratorMessage], user_number: str, business_number: str, inbound_id: str, correlation_id: str):
     v_ycloud = await get_config("YCLOUD_API_KEY", YCLOUD_API_KEY)
     client = YCloudClient(v_ycloud, business_number)
-    
-    try: 
+
+    try:
         await client.mark_as_read(inbound_id, correlation_id)
         await client.typing_indicator(inbound_id, correlation_id)
     except: pass
 
-    for msg in messages:
+    # Plan mínimo de mensajes: imagen+texto viajan juntos como caption
+    # (menos mensajes facturables por Meta y secuencia más rápida).
+    actions = plan_send_actions([{"text": m.text, "imageUrl": m.imageUrl} for m in messages])
+    logger.info("send_plan_ready", bubbles_in=len(messages), messages_out=len(actions), correlation_id=correlation_id)
+
+    for i, action in enumerate(actions):
         try:
-            # 1. Image Bubble
-            if msg.imageUrl:
-                try: await client.typing_indicator(inbound_id, correlation_id)
-                except: pass
-                await asyncio.sleep(4)
-                await client.send_image(user_number, msg.imageUrl, correlation_id)
-                try: await client.mark_as_read(inbound_id, correlation_id)
-                except: pass
+            try: await client.typing_indicator(inbound_id, correlation_id)
+            except: pass
 
-            # 2. Text Bubble(s) with Safety Splitter (Layer 2)
-            if msg.text:
-                # Emergency splitting if orchestrator sent a wall of text (>400 chars)
-                import re
-                if len(msg.text) > 400:
-                    text_parts = re.split(r'(?<=[.!?]) +', msg.text)
-                    refined_parts = []
-                    current = ""
-                    for p in text_parts:
-                        if len(current) + len(p) < 400:
-                            current += (" " + p if current else p)
-                        else:
-                            if current: refined_parts.append(current)
-                            current = p
-                    if current: refined_parts.append(current)
-                else:
-                    refined_parts = [msg.text]
+            if action["type"] == "image":
+                await asyncio.sleep(DELAY_IMAGE_SECONDS)
+                await client.send_image(user_number, action["url"], correlation_id, caption=action.get("caption"))
+            else:
+                await asyncio.sleep(DELAY_TEXT_SECONDS)
+                await client.send_text(user_number, action["text"], correlation_id)
 
-                for part in refined_parts:
-                    try: await client.typing_indicator(inbound_id, correlation_id)
-                    except: pass
-                    await asyncio.sleep(1.5)
-                    await client.send_text(user_number, part, correlation_id)
-                    try: await client.mark_as_read(inbound_id, correlation_id)
-                    except: pass
-
-            # Delay between messages to prevent out-of-order delivery
-            await asyncio.sleep(2)
+            # Pausa breve entre mensajes para preservar el orden de entrega
+            if i < len(actions) - 1:
+                await asyncio.sleep(DELAY_BETWEEN_BUBBLES_SECONDS)
 
         except Exception as e:
             logger.error("sequence_step_error", error=str(e), correlation_id=correlation_id)
@@ -236,7 +237,7 @@ async def process_user_buffer(from_number: str, business_number: str, customer_n
         while True:
             # 1. Debounce Phase: Wait until user stopped typing
             while True:
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
                 if redis_client.ttl(timer_key) <= 0: break
             
             # 2. Atomic Fetch: How many messages are we starting with?
@@ -306,7 +307,7 @@ async def process_user_buffer(from_number: str, business_number: str, customer_n
             else:
                 log.info("new_messages_while_responding", remaining=redis_client.llen(buffer_key))
                 # Reset timer to force a small fresh debounce for the new messages
-                redis_client.setex(timer_key, 5, "1")
+                redis_client.setex(timer_key, DEBOUNCE_SECONDS, "1")
 
     except Exception as e:
         log.error("buffer_process_error", error=str(e))
@@ -358,8 +359,11 @@ async def ycloud_webhook(request: Request):
                     "wamid": msg.get("wamid") or event.get("id"),
                     "event_id": event.get("id")
                 }))
-                redis_client.setex(timer_key, 12, "1")
-                
+                redis_client.setex(timer_key, DEBOUNCE_SECONDS, "1")
+
+                # Feedback inmediato mientras el bot piensa
+                asyncio.create_task(_notify_typing(msg.get("wamid") or event.get("id"), to_n, correlation_id))
+
                 if not redis_client.get(lock_key):
                     redis_client.setex(lock_key, 60, "1")
                     asyncio.create_task(process_user_buffer(from_n, to_n, name, event.get("id"), msg.get("wamid") or event.get("id")))
@@ -402,6 +406,8 @@ async def ycloud_webhook(request: Request):
             # Transcription
             if node.get("link"):
                 logger.info("audio_received_starting_transcription", correlation_id=correlation_id)
+                # La transcripción tarda: mostrar "escribiendo..." mientras tanto
+                asyncio.create_task(_notify_typing(msg.get("wamid") or event.get("id"), to_n, correlation_id))
                 transcription = await transcribe_audio(node.get("link"), correlation_id)
                 if transcription:
                      text_content = transcription

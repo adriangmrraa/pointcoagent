@@ -38,14 +38,18 @@ class YCloudClient:
         logger.info("ycloud_send_text", to=to, text_preview=text[:30], correlation_id=correlation_id)
         return await self._post("/whatsapp/messages/sendDirectly", payload, correlation_id)
 
-    async def send_image(self, to: str, image_url: str, correlation_id: str):
+    async def send_image(self, to: str, image_url: str, correlation_id: str, caption: str = None):
+        image_payload = {"link": image_url}
+        if caption:
+            # WhatsApp permite hasta 1024 chars de caption: imagen + ficha en UN mensaje
+            image_payload["caption"] = caption[:1024]
         payload = {
             "from": self.business_number,
             "to": to,
             "type": "image",
-            "image": {"link": image_url}
+            "image": image_payload
         }
-        logger.info("ycloud_send_image", to=to, image_url=image_url, correlation_id=correlation_id)
+        logger.info("ycloud_send_image", to=to, image_url=image_url, has_caption=bool(caption), correlation_id=correlation_id)
         return await self._post("/whatsapp/messages/sendDirectly", payload, correlation_id)
 
     async def mark_as_read(self, inbound_id: str, correlation_id: str):
