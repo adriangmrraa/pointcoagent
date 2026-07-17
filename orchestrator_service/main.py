@@ -45,6 +45,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from db import db
+from catalog import is_product_available, available_variant_values
 
 # Configuration & Environment
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -623,18 +624,8 @@ def simplify_product(p):
         promo_price = v0.get("promotional_price", None)
         
         # Summarize variants (e.g., "Color: Rojo, Azul")
-        seen_options = set()
-        for v in variants:
-            if not isinstance(v, dict): continue
-            v_values = v.get("values") or []
-            if isinstance(v_values, list):
-                for val in v_values:
-                    if isinstance(val, dict):
-                        val_str = val.get("es") or val.get("en") 
-                        if val_str: seen_options.add(val_str)
-        
-        if seen_options:
-            variant_details = list(seen_options)
+        # Solo variantes CON stock: el bot no debe ofrecer un talle/color agotado.
+        variant_details = available_variant_values(variants)
 
     # Extract first image URL
     image_url = None
@@ -703,8 +694,9 @@ async def call_tiendanube_api(endpoint: str, params: dict = None):
             data = response.json()
             
             # Auto-simplify if it's a list of products
+            # Filtro de disponibilidad: productos sin stock o despublicados no llegan al modelo.
             if isinstance(data, list) and "/products" in endpoint:
-                return [simplify_product(p) for p in data]
+                return [simplify_product(p) for p in data if is_product_available(p)]
                 
             return data
     except Exception as e:
@@ -724,7 +716,7 @@ async def search_specific_products(q: str):
     cached = get_cached_tool(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
-    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
+    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
     return result
 
 @tool
@@ -735,7 +727,7 @@ async def search_by_category(category: str, keyword: str):
     cached = get_cached_tool(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
-    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
+    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
     return result
 
 @tool
@@ -745,7 +737,7 @@ async def browse_general_storefront():
     cached = get_cached_tool(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"per_page": 9})
-    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=600)
+    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
     return result
 
 @tool
