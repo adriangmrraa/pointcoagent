@@ -8,10 +8,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "whatsapp_service"))
 
-from transcription_provider import resolve_transcription_config
+from transcription_provider import (
+    resolve_transcription_config,
+    audio_format_from_mime,
+    build_audio_chat_payload,
+)
 
 OA = "sk-openai-key"
 GROQ = "gsk_groq-key"
+OR = "sk-or-v1-key"
 
 
 def test_default_es_openai_con_key_de_openai():
@@ -53,6 +58,39 @@ def test_rollback_limpiando_vars_vuelve_a_openai():
     assert groq["provider"] == "groq"
     assert openai["provider"] == "openai"
     assert openai["api_key"] == OA
+
+
+# --- Modo OpenRouter (audio vía chat multimodal) ---
+
+def test_openrouter_usa_modo_chat_audio():
+    c = resolve_transcription_config("https://openrouter.ai/api/v1", "google/gemini-2.0-flash-001", OR, OA)
+    assert c["provider"] == "openrouter"
+    assert c["mode"] == "chat_audio"
+    assert c["chat_url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert c["api_key"] == OR
+
+
+def test_openai_y_groq_usan_modo_whisper():
+    assert resolve_transcription_config(None, None, None, OA)["mode"] == "whisper"
+    assert resolve_transcription_config("https://api.groq.com/openai/v1", None, GROQ, OA)["mode"] == "whisper"
+
+
+def test_audio_format_from_mime():
+    assert audio_format_from_mime("audio/ogg; codecs=opus") == "ogg"
+    assert audio_format_from_mime("audio/mpeg") == "mp3"
+    assert audio_format_from_mime("audio/mp4") == "m4a"
+    assert audio_format_from_mime("audio/wav") == "wav"
+    assert audio_format_from_mime(None) == "ogg"  # WhatsApp default
+
+
+def test_build_audio_chat_payload_estructura():
+    p = build_audio_chat_payload("google/gemini-2.0-flash-001", "BASE64DATA", "ogg")
+    assert p["model"] == "google/gemini-2.0-flash-001"
+    content = p["messages"][0]["content"]
+    tipos = [c["type"] for c in content]
+    assert "text" in tipos and "input_audio" in tipos
+    audio_part = next(c for c in content if c["type"] == "input_audio")
+    assert audio_part["input_audio"] == {"data": "BASE64DATA", "format": "ogg"}
 
 
 if __name__ == "__main__":
