@@ -18,6 +18,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 
 from ycloud_client import YCloudClient
 from sequence_planner import plan_send_actions
+from transcription_provider import resolve_transcription_config
 
 # Initialize config
 load_dotenv()
@@ -58,6 +59,11 @@ async def get_config(name: str, default: str = None) -> str:
 YCLOUD_API_KEY = os.getenv("YCLOUD_API_KEY")
 YCLOUD_WEBHOOK_SECRET = os.getenv("YCLOUD_WEBHOOK_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Transcripción de audio: OpenRouter NO la revende. Default OpenAI; para sacar el
+# gasto de OpenAI, apuntar a Groq (whisper-large-v3). Rollback = limpiar estas vars.
+TRANSCRIPTION_BASE_URL = os.getenv("TRANSCRIPTION_BASE_URL", "https://api.openai.com/v1")
+TRANSCRIPTION_MODEL = os.getenv("TRANSCRIPTION_MODEL", "whisper-1")
+TRANSCRIPTION_API_KEY = os.getenv("TRANSCRIPTION_API_KEY")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator_service:8000")
@@ -152,30 +158,32 @@ async def forward_to_orchestrator(payload: dict, headers: dict):
         return response.json()
 
 async def transcribe_audio(audio_url: str, correlation_id: str) -> Optional[str]:
-    """Downloads audio from YCloud and transcribes it using OpenAI Whisper."""
-    if not OPENAI_API_KEY:
-        logger.error("missing_openai_api_key", note="Transcription requires OpenAI API key")
+    """Downloads audio from YCloud and transcribes it (OpenAI Whisper por defecto,
+    o Groq si TRANSCRIPTION_BASE_URL apunta a groq.com)."""
+    # Resolver key: la propia de transcripción tiene prioridad, si no cae a OpenAI
+    trans_key = await get_config("TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
+    openai_key = await get_config("OPENAI_API_KEY", OPENAI_API_KEY)
+    cfg = resolve_transcription_config(TRANSCRIPTION_BASE_URL, TRANSCRIPTION_MODEL, trans_key, openai_key)
+    if not cfg["api_key"]:
+        logger.error("missing_transcription_api_key", provider=cfg["provider"],
+                     note="Falta TRANSCRIPTION_API_KEY u OPENAI_API_KEY")
         return None
-    
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             # 1. Download audio
             audio_res = await client.get(audio_url)
             audio_res.raise_for_status()
             audio_data = audio_res.content
-            
-            # 2. Transcribe with Whisper
+
+            # 2. Transcribe (endpoint compatible OpenAI: OpenAI o Groq)
             files = {"file": ("audio.ogg", audio_data, "audio/ogg")}
-            v_openai = await get_config("OPENAI_API_KEY", OPENAI_API_KEY)
-            headers = {"Authorization": f"Bearer {v_openai}"}
-            data = {"model": "whisper-1"}
-            
-            trans_res = await client.post(
-                "https://api.openai.com/v1/audio/transcriptions",
-                headers=headers,
-                files=files,
-                data=data
-            )
+            headers = {"Authorization": f"Bearer {cfg['api_key']}"}
+            data = {"model": cfg["model"]}
+
+            logger.info("transcription_provider_selected", provider=cfg["provider"],
+                        model=cfg["model"], correlation_id=correlation_id)
+            trans_res = await client.post(cfg["url"], headers=headers, files=files, data=data)
             trans_res.raise_for_status()
             return trans_res.json().get("text")
     except Exception as e:
