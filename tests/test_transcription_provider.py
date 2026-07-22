@@ -8,11 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "whatsapp_service"))
 
-from transcription_provider import (
-    resolve_transcription_config,
-    audio_format_from_mime,
-    build_audio_chat_payload,
-)
+from transcription_provider import resolve_transcription_config
 
 OA = "sk-openai-key"
 GROQ = "gsk_groq-key"
@@ -60,37 +56,20 @@ def test_rollback_limpiando_vars_vuelve_a_openai():
     assert openai["api_key"] == OA
 
 
-# --- Modo OpenRouter (audio vía chat multimodal) ---
+# --- OpenRouter: Whisper real por multipart (verificado 2026-07) ---
 
-def test_openrouter_usa_modo_chat_audio():
-    c = resolve_transcription_config("https://openrouter.ai/api/v1", "google/gemini-2.0-flash-001", OR, OA)
+def test_openrouter_usa_whisper_multipart_con_su_key():
+    c = resolve_transcription_config("https://openrouter.ai/api/v1", "openai/whisper-1", OR, OA)
     assert c["provider"] == "openrouter"
-    assert c["mode"] == "chat_audio"
-    assert c["chat_url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert c["url"] == "https://openrouter.ai/api/v1/audio/transcriptions"
+    assert c["model"] == "openai/whisper-1"
     assert c["api_key"] == OR
 
 
-def test_openai_y_groq_usan_modo_whisper():
-    assert resolve_transcription_config(None, None, None, OA)["mode"] == "whisper"
-    assert resolve_transcription_config("https://api.groq.com/openai/v1", None, GROQ, OA)["mode"] == "whisper"
-
-
-def test_audio_format_from_mime():
-    assert audio_format_from_mime("audio/ogg; codecs=opus") == "ogg"
-    assert audio_format_from_mime("audio/mpeg") == "mp3"
-    assert audio_format_from_mime("audio/mp4") == "m4a"
-    assert audio_format_from_mime("audio/wav") == "wav"
-    assert audio_format_from_mime(None) == "ogg"  # WhatsApp default
-
-
-def test_build_audio_chat_payload_estructura():
-    p = build_audio_chat_payload("google/gemini-2.0-flash-001", "BASE64DATA", "ogg")
-    assert p["model"] == "google/gemini-2.0-flash-001"
-    content = p["messages"][0]["content"]
-    tipos = [c["type"] for c in content]
-    assert "text" in tipos and "input_audio" in tipos
-    audio_part = next(c for c in content if c["type"] == "input_audio")
-    assert audio_part["input_audio"] == {"data": "BASE64DATA", "format": "ogg"}
+def test_los_tres_proveedores_usan_el_mismo_endpoint():
+    for base in ["https://api.openai.com/v1", "https://api.groq.com/openai/v1", "https://openrouter.ai/api/v1"]:
+        c = resolve_transcription_config(base, "whisper-1", "k", OA)
+        assert c["url"].endswith("/audio/transcriptions")
 
 
 if __name__ == "__main__":

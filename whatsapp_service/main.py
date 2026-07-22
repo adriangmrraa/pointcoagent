@@ -18,11 +18,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 
 from ycloud_client import YCloudClient
 from sequence_planner import plan_send_actions
-from transcription_provider import (
-    resolve_transcription_config,
-    build_audio_chat_payload,
-    audio_format_from_mime,
-)
+from transcription_provider import resolve_transcription_config
 
 # Initialize config
 load_dotenv()
@@ -161,9 +157,9 @@ async def forward_to_orchestrator(payload: dict, headers: dict):
         response.raise_for_status()
         return response.json()
 
-async def transcribe_audio(audio_url: str, correlation_id: str, mime_type: str = None) -> Optional[str]:
-    """Descarga el audio de YCloud y lo transcribe. Tres modos según TRANSCRIPTION_BASE_URL:
-    OpenAI/Groq (Whisper multipart) u OpenRouter (modelo multimodal vía chat)."""
+async def transcribe_audio(audio_url: str, correlation_id: str) -> Optional[str]:
+    """Descarga el audio de YCloud y lo transcribe con Whisper (endpoint compatible
+    OpenAI: sirve OpenAI, OpenRouter o Groq según TRANSCRIPTION_BASE_URL)."""
     # Resolver key: la propia de transcripción tiene prioridad, si no cae a OpenAI
     trans_key = await get_config("TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
     openai_key = await get_config("OPENAI_API_KEY", OPENAI_API_KEY)
@@ -180,28 +176,13 @@ async def transcribe_audio(audio_url: str, correlation_id: str, mime_type: str =
             audio_res.raise_for_status()
             audio_data = audio_res.content
 
-            logger.info("transcription_provider_selected", provider=cfg["provider"],
-                        mode=cfg["mode"], model=cfg["model"], correlation_id=correlation_id)
-
-            # 2a. Modo OpenRouter: audio en base64 dentro de /chat/completions
-            if cfg["mode"] == "chat_audio":
-                import base64
-                audio_b64 = base64.b64encode(audio_data).decode()
-                fmt = audio_format_from_mime(mime_type)
-                payload = build_audio_chat_payload(cfg["model"], audio_b64, fmt)
-                headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
-                resp = await client.post(cfg["chat_url"], headers=headers, json=payload)
-                resp.raise_for_status()
-                choices = (resp.json() or {}).get("choices") or []
-                if not choices:
-                    logger.error("transcription_empty_choices", provider=cfg["provider"], correlation_id=correlation_id)
-                    return None
-                return (choices[0].get("message") or {}).get("content")
-
-            # 2b. Modo Whisper (OpenAI / Groq): multipart a /audio/transcriptions
+            # 2. Transcribe (Whisper multipart, mismo formato en los 3 proveedores)
             files = {"file": ("audio.ogg", audio_data, "audio/ogg")}
             headers = {"Authorization": f"Bearer {cfg['api_key']}"}
             data = {"model": cfg["model"]}
+
+            logger.info("transcription_provider_selected", provider=cfg["provider"],
+                        model=cfg["model"], correlation_id=correlation_id)
             trans_res = await client.post(cfg["url"], headers=headers, files=files, data=data)
             trans_res.raise_for_status()
             return trans_res.json().get("text")
@@ -435,7 +416,7 @@ async def ycloud_webhook(request: Request):
                 logger.info("audio_received_starting_transcription", correlation_id=correlation_id)
                 # La transcripción tarda: mostrar "escribiendo..." mientras tanto
                 asyncio.create_task(_notify_typing(msg.get("wamid") or event.get("id"), to_n, correlation_id))
-                transcription = await transcribe_audio(node.get("link"), correlation_id, node.get("mime_type"))
+                transcription = await transcribe_audio(node.get("link"), correlation_id)
                 if transcription:
                      text_content = transcription
                      

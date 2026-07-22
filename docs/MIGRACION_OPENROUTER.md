@@ -21,7 +21,11 @@
 | Agente / chat (lo más caro) | `/chat/completions` | OpenAI **o** OpenRouter | `orchestrator_service/main.py` + `llm_provider.py` |
 | Transcripción de audio | `/audio/transcriptions` (Whisper) **o** `/chat/completions` (multimodal) | OpenAI, Groq **o** OpenRouter | `whatsapp_service/main.py` + `transcription_provider.py` |
 
-No hay embeddings ni realtime en el proyecto: estos dos son los ÚNICOS consumos de IA.
+**El proyecto HOY solo usa chat + transcripción.** NO usa embeddings, NO usa
+visión (recibe imágenes de WhatsApp pero no las manda a ningún modelo), NO usa
+realtime. Si en el futuro se agrega alguna, se migra con el mismo principio
+(nombre de modelo con "/" → OpenRouter). Realtime es lo único que OpenRouter no
+revende: quedaría en OpenAI o se rediseña aparte.
 
 ---
 
@@ -44,35 +48,28 @@ Deploy. Verificar en troncos: `llm_provider_selected ... provider=openrouter`.
 
 ---
 
-## 4. Audio → Groq u OpenRouter
+## 4. Audio → OpenRouter (o Groq)
 
-Selector por `TRANSCRIPTION_BASE_URL`:
-- `...openai.com...` o `...groq.com...` → Whisper multipart (`/audio/transcriptions`).
-- `...openrouter.ai...` → modelo multimodal con audio en base64 (`/chat/completions`).
+OpenRouter tiene Whisper REAL vía el MISMO endpoint que OpenAI
+(`/audio/transcriptions`, multipart, soporta `ogg`) — verificado 2026-07. Los tres
+proveedores usan el mismo código; solo cambian base_url + key + modelo.
 
-**Opción A — Todo en OpenRouter (un solo proveedor):**
+**Opción A (recomendada) — Todo en OpenRouter, un solo proveedor:**
 ```
 TRANSCRIPTION_BASE_URL=https://openrouter.ai/api/v1
-TRANSCRIPTION_MODEL=google/gemini-2.0-flash-001    # debe aceptar audio
-TRANSCRIPTION_API_KEY=sk-or-v1-...
+TRANSCRIPTION_MODEL=openai/whisper-1
+TRANSCRIPTION_API_KEY=sk-or-v1-...     # la MISMA key de OpenRouter del chat
 ```
+Con esto el chat y el audio quedan en OpenRouter: una cuenta, una key, un solo
+lugar. Mismo Whisper que hoy, misma calidad.
 
-**Opción B — Groq (Whisper dedicado, mejor transcripción, muy barato):**
+**Opción B — Groq (Whisper large-v3, aún más barato):**
 ```
 TRANSCRIPTION_BASE_URL=https://api.groq.com/openai/v1
 TRANSCRIPTION_MODEL=whisper-large-v3-turbo
 TRANSCRIPTION_API_KEY=gsk_...
 ```
-Deploy `whatsapp_service`. Verificar en troncos: `transcription_provider_selected ... provider=... mode=...`.
-
-> ⚠️ **Probar con notas de voz reales antes de confiar.** El modo OpenRouter usa
-> un LLM multimodal para transcribir: es más flexible pero puede resumir o
-> equivocarse más que Whisper. Groq (Whisper large-v3) es lo más fiel para
-> español. Recomendación: si el audio importa mucho para entender el pedido,
-> usar Groq (Opción B); si se prioriza "un solo proveedor", OpenRouter (Opción A)
-> validando calidad primero.
-> ⚠️ OpenRouter: no todos los modelos aceptan `ogg` (formato de WhatsApp).
-> `google/gemini-2.0-flash-001` sí. Si cambiás de modelo, verificar.
+Deploy `whatsapp_service`. Verificar en troncos: `transcription_provider_selected ... provider=...`.
 
 ---
 
@@ -105,7 +102,7 @@ variables nunca = comportamiento OpenAI por defecto.)
 | `OPENROUTER_API_KEY` | orchestrator | (vacío) | `sk-or-v1-...` |
 | `LLM_MODEL` | orchestrator | `gpt-4.1-mini` | `openai/gpt-4.1-mini` |
 | `TRANSCRIPTION_BASE_URL` | whatsapp | `https://api.openai.com/v1` | groq.com o openrouter.ai |
-| `TRANSCRIPTION_MODEL` | whatsapp | `whisper-1` | `whisper-large-v3-turbo` / `google/gemini-2.0-flash-001` |
+| `TRANSCRIPTION_MODEL` | whatsapp | `whisper-1` | `openai/whisper-1` (OpenRouter) / `whisper-large-v3-turbo` (Groq) |
 | `TRANSCRIPTION_API_KEY` | whatsapp | (vacío → usa OPENAI_API_KEY) | `gsk_...` / `sk-or-v1-...` |
 
 ---
