@@ -33,10 +33,10 @@ current_turn_allowed_urls: ContextVar[Optional[set]] = ContextVar("current_turn_
 load_dotenv()
 
 try:
-    from langchain.agents import AgentExecutor, create_openai_functions_agent
+    from langchain.agents import AgentExecutor, create_openai_tools_agent, create_openai_functions_agent
 except ImportError:
     from langchain.agents.agent import AgentExecutor
-    from langchain.agents import create_openai_functions_agent
+    from langchain.agents import create_openai_tools_agent, create_openai_functions_agent
 
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -1163,7 +1163,14 @@ MAPA DE CATEGORÍAS (Usar para búsquedas proactivas):
     logger.info("llm_provider_selected", provider=prov["provider"], model=prov["model"])
     llm = ChatOpenAI(**llm_kwargs)
 
-    agent_def = create_openai_functions_agent(llm, tools, prompt)
+    # API moderno de "tools": OpenRouter invoca las herramientas de forma fiable
+    # (con el API viejo de "functions" alucinaba productos en vez de buscar).
+    # Compatible también con OpenAI directo, así que no cambia el flujo original.
+    try:
+        agent_def = create_openai_tools_agent(llm, tools, prompt)
+    except Exception as e:
+        logger.warning("tools_agent_unavailable_fallback_functions", error=str(e))
+        agent_def = create_openai_functions_agent(llm, tools, prompt)
     return AgentExecutor(agent=agent_def, tools=tools, verbose=True)
 
 # Global fallback for health checks (optional)
