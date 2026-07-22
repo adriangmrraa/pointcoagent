@@ -49,9 +49,14 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from db import db
 from catalog import is_product_available, available_variant_values
 from guardrails import collect_urls, filter_outbound_messages, FALLBACK_TEXT
+from llm_provider import resolve_llm_provider
 
 # Configuration & Environment
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OpenRouter revende los modelos de OpenAI con API compatible. Se activa poniendo
+# LLM_MODEL con "/" (ej. "openai/gpt-4.1-mini"). Sin "/" = OpenAI directo (rollback).
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4.1-mini")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 POSTGRES_DSN = os.getenv("POSTGRES_DSN")
@@ -1109,17 +1114,27 @@ MAPA DE CATEGORÍAS (Usar para búsquedas proactivas):
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ]).partial(format_instructions=parser.get_format_instructions())
 
-    if not current_openai_key:
-        raise ValueError("OPENAI_API_KEY environment variable is not set")
+    # Selección de proveedor por el nombre del modelo (LLM_MODEL).
+    #   con "/"  -> OpenRouter (paga OpenRouter, mismo modelo de OpenAI)
+    #   sin "/"  -> OpenAI directo (comportamiento original)
+    prov = resolve_llm_provider(LLM_MODEL, current_openai_key, OPENROUTER_API_KEY)
+    if not prov["api_key"]:
+        faltante = "OPENROUTER_API_KEY" if prov["provider"] == "openrouter" else "OPENAI_API_KEY"
+        raise ValueError(f"Falta {faltante} para el modelo '{LLM_MODEL}' (proveedor {prov['provider']})")
 
-    llm = ChatOpenAI(
-        model="gpt-4.1-mini",
-        api_key=current_openai_key, 
-        temperature=0, 
+    llm_kwargs = dict(
+        model=prov["model"],
+        api_key=prov["api_key"],
+        temperature=0,
         max_tokens=2000,
-        model_kwargs={"response_format": {"type": "json_object"}}
+        model_kwargs={"response_format": {"type": "json_object"}},
     )
-    
+    if prov["base_url"]:
+        llm_kwargs["base_url"] = prov["base_url"]
+
+    logger.info("llm_provider_selected", provider=prov["provider"], model=prov["model"])
+    llm = ChatOpenAI(**llm_kwargs)
+
     agent_def = create_openai_functions_agent(llm, tools, prompt)
     return AgentExecutor(agent=agent_def, tools=tools, verbose=True)
 
