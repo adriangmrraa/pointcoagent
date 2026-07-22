@@ -47,7 +47,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from db import db
-from catalog import is_product_available, available_variant_values
+from catalog import is_product_available, available_variant_values, pick_category_id
 from guardrails import collect_urls, filter_outbound_messages, FALLBACK_TEXT
 from llm_provider import resolve_llm_provider
 
@@ -744,6 +744,33 @@ async def orders(q: str):
     # Using search parameter 'q' as seen in the successful n8n config
     return await call_tiendanube_api("/orders", {"q": clean_q})
 
+async def resolve_category_id(name: str):
+    """Resuelve el id de una categoría real de Tienda Nube por nombre (cacheado 1h)."""
+    cats = get_cached_tool("categories_all")
+    if not cats:
+        cats = await call_tiendanube_api("/categories", {"per_page": 100})
+        if isinstance(cats, list):
+            set_cached_tool("categories_all", cats, ttl=3600)
+    if not isinstance(cats, list):
+        return None
+    return pick_category_id(cats, name)
+
+@tool
+async def search_by_store_category(category_name: str):
+    """Lista productos EN STOCK de una CATEGORÍA REAL de la tienda (por category_id).
+    Usar para BOLSOS: trae bolsos Y mochilas juntos (que por nombre no se encuentran
+    con una búsqueda de texto). Input: nombre de la categoría, ej: 'Bolsos'."""
+    cid = await resolve_category_id(category_name)
+    if not cid:
+        # Fallback: si no se encontró la categoría, búsqueda por texto normal.
+        return await call_tiendanube_api("/products", {"q": category_name, "per_page": 15})
+    cache_key = f"cat_products:{cid}"
+    cached = get_cached_tool(cache_key)
+    if cached: return cached
+    result = await call_tiendanube_api("/products", {"category_id": cid, "per_page": 20})
+    if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
+    return result
+
 @tool
 async def sendemail(subject: str, text: str):
     """Send an email to support or customer via n8n MCP."""
@@ -846,7 +873,7 @@ Tienda: {store_name}
         await log_db("error", "handoff_email_failed", str(e), {"tid": tid, "cid": str(cid)})
         return f"Error sending handoff email: {str(e)}"
 
-tools = [search_specific_products, search_by_category, browse_general_storefront, cupones_list, orders, derivhumano]
+tools = [search_specific_products, search_by_category, browse_general_storefront, search_by_store_category, cupones_list, orders, derivhumano]
 
 from langchain.output_parsers import PydanticOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
@@ -920,7 +947,7 @@ Fecha y hora actual: {current_time}.
 *   **MEDIA PUNTA:** media punta, medias puntas, zapatillas de media punta, zapatillas de ensayo, zapatillas de tela, slippers de ballet.
 *   **ZAPATILLAS DE PUNTA:** puntas, zapatillas de punta, pointe, pointe shoes, calzado de punta (NO confundir con media punta), etc.
 *   **MEDIAS:** medias, medias de ballet, medias de danza, medias convertibles, convertible socks, panty, pantymedia, cancan, cancanes, can can.
-*   **BOLSOS:** bolso, bolso de danza, bolso de ballet, mochila de danza, mochila para ballet, bag de danza.
+*   **BOLSOS:** bolso, bolsos, bolso de danza, bolso de ballet, mochila, mochilas, mochila de danza, mochila para ballet, bag de danza. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Bolsos")`, que trae los bolsos Y las mochilas juntos. NO uses búsqueda de texto para bolsos/mochilas.)
 *   **LEOTARDOS:** malla, mallas, leotardo, leotard, maillot, body, malla de ballet, body de danza, enterito, enteriza, malla entera.
 *   **PUNTERAS:** punteras, punteras de gel, almohadillas para puntas, pads de punteras.
 *   **SEPARADORES DE DEDOS:** separadores de dedos, separadores, protectores de dedos, dederas, gel para dedos, separadores de gel, almohadillas para dedos, toe spacers, spacemakers, bunheads separadores.
@@ -1029,9 +1056,10 @@ Los siguientes términos son AMBIGUOS porque pueden referirse a más de una cate
 1. `search_specific_products`: busca por keyword (q). q DEBE incluir categoría + marca/modelo.
 2. `search_by_category`: category + keyword.
 3. `browse_general_storefront`: USAR SIEMPRE para consultas vagas ("¿Qué tienen?", "Mostrame algo") o como último recurso. No repreguntar, mostrar productos.
-4. `cupones_list`: promos.
-5. `orders`: estado pedido (q=número).
-6. `derivhumano`: derivación.
+4. `search_by_store_category`: lista una CATEGORÍA REAL completa (input: nombre, ej "Bolsos"). Usar OBLIGATORIAMENTE para bolsos/mochilas (trae ambos juntos).
+5. `cupones_list`: promos.
+6. `orders`: estado pedido (q=número).
+7. `derivhumano`: derivación.
 
 ## REGLA DE RESULTADOS (CANTIDAD)
 

@@ -36,6 +36,35 @@ def is_product_available(product) -> bool:
     return any(variant_has_stock(v) for v in variants)
 
 
+def pick_category_id(categories, name):
+    """Resuelve el id de una categoría de Tienda Nube por su nombre (es).
+
+    Busca coincidencia exacta primero; si no, coincidencia parcial (contiene).
+    Devuelve el id (int) o None. Útil para buscar por categoría real en vez de
+    por texto (ej: 'Bolsos' trae bolsos Y mochilas, que por nombre no matchean).
+    """
+    if not name or not isinstance(categories, list):
+        return None
+    target = str(name).strip().lower()
+    if not target:
+        return None
+    # 1. Coincidencia exacta
+    for c in categories:
+        if not isinstance(c, dict):
+            continue
+        cn = ((c.get("name") or {}).get("es") or "").strip().lower()
+        if cn and cn == target:
+            return c.get("id")
+    # 2. Coincidencia parcial
+    for c in categories:
+        if not isinstance(c, dict):
+            continue
+        cn = ((c.get("name") or {}).get("es") or "").strip().lower()
+        if cn and (target in cn or cn in target):
+            return c.get("id")
+    return None
+
+
 def available_variant_values(variants) -> list:
     """Valores de variantes (talles/colores) SOLO de variantes con stock,
     preservando el orden de aparición. Así el bot no ofrece un color agotado."""

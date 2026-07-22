@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "orchestrator_service"))
 
-from catalog import variant_has_stock, is_product_available, available_variant_values
+from catalog import variant_has_stock, is_product_available, available_variant_values, pick_category_id
 
 
 def v(stock, values=None):
@@ -84,6 +84,35 @@ def test_fallback_ingles():
 def test_lista_invalida():
     assert available_variant_values(None) == []
     assert available_variant_values("x") == []
+
+
+# --- pick_category_id (búsqueda por categoría real) ---
+
+CATS = [
+    {"id": 34839644, "name": {"es": "Bolsos"}},
+    {"id": 35012479, "name": {"es": "Accesorios"}},
+    {"id": 35012485, "name": {"es": "Accesorios para el pie"}},
+]
+
+def test_categoria_match_exacto():
+    assert pick_category_id(CATS, "Bolsos") == 34839644
+    assert pick_category_id(CATS, "bolsos") == 34839644  # case-insensitive
+
+def test_categoria_match_parcial():
+    # "bolso" (singular) encuentra "Bolsos"
+    assert pick_category_id(CATS, "bolso") == 34839644
+
+def test_categoria_prioriza_exacto_sobre_parcial():
+    # "Accesorios" exacto no debe caer en "Accesorios para el pie"
+    assert pick_category_id(CATS, "Accesorios") == 35012479
+
+def test_categoria_inexistente_devuelve_none():
+    assert pick_category_id(CATS, "Zapatillas") is None
+
+def test_categoria_entradas_invalidas():
+    assert pick_category_id(CATS, "") is None
+    assert pick_category_id(CATS, None) is None
+    assert pick_category_id(None, "Bolsos") is None
 
 
 if __name__ == "__main__":
