@@ -113,6 +113,12 @@ Las 3 barreras anti-alucinacion originales (Regla de Veracidad + Gate Absoluto +
 - Mensaje unico de cierre: "Para coordinar tu visita al local te vamos a contactar con una asesora del equipo, que te confirma dia y horario! En breve se comunica con vos."
 - Origen: una clienta fue al local tras confirmacion del bot, sin conocimiento de la dueña.
 
+## Compromisos en Nombre del Equipo (Regla 11 - NUEVO 2026-07)
+
+Derivacion obligatoria (`derivhumano`) ante: cambios/devoluciones, pedidos de descuento o negociacion de precio, encargos/reposiciones/"avisame cuando llegue", mensajes o contactos del equipo ("decile a X", "pasame el numero de X"), y presencia en eventos/ferias.
+- NO rompe los flujos existentes: promos reales siguen via `cupones_list`; asesorar talles antes de comprar sigue normal; productos fuera de rubro siguen con la Regla 8.
+- Nunca compartir telefonos/mails personales del equipo.
+
 ## Fitting (Solo Puntas) - Protocolo Completo
 
 - **Puede:** Proponer fitting y derivar con `derivhumano`.
