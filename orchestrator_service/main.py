@@ -866,7 +866,7 @@ Tienda: {store_name}
         
         logger.info("handoff_email_sent_smtp", to=target_email, host=h_smtp_host, locking_cid=cid)
 
-        return f"Handoff SUCCESSFUL. AI LOCKED. Manda el mensaje de cierre según el motivo: (1) Para FITTING/PUNTAS, usá: '➡Te derivamos con una asesora (FITTER), que esta capacitada para que encuentres la mejor punta que se adecue a TU PIE 🩰 en breve se contacta con vos.' (2) Para PEDIDOS, usá: 'Fijate que ya te contacto con mis compañeras para que te ayuden con tu orden #... y sepas exactamente el estado.' (3) Para OTROS (ayuda general, quejas, pedido de humano), usá un mensaje cálido y coherente con lo que pidió el usuario."
+        return f"Handoff SUCCESSFUL. AI LOCKED. Manda el mensaje de cierre según el motivo: (1) Para FITTING/PUNTAS, usá: '➡Te derivamos con una asesora (FITTER), que esta capacitada para que encuentres la mejor punta que se adecue a TU PIE 🩰 en breve se contacta con vos.' (2) Para PEDIDOS, usá: 'Fijate que ya te contacto con mis compañeras para que te ayuden con tu orden #... y sepas exactamente el estado.' (3) Para VISITAS AL LOCAL / RETIROS / RESERVAS, usá: 'Para coordinar tu visita al local te vamos a contactar con una asesora del equipo, que te confirma día y horario! En breve se comunica con vos.' NUNCA confirmes horario ni digas te esperamos. (4) Para OTROS (ayuda general, quejas, pedido de humano), usá un mensaje cálido y coherente con lo que pidió el usuario."
             
     except Exception as e:
         logger.error("handoff_email_failed", error=str(e))
@@ -1035,6 +1035,17 @@ Los siguientes términos son AMBIGUOS porque pueden referirse a más de una cate
 6. **ENVÍOS:** Trabajamos con {SHIPPING_PARTNERS}. PROHIBIDO dar precios o tiempos de entrega. Tu única respuesta permitida es: "El costo y tiempo de envío se calculan al final de la compra según tu ubicación."
 7. **OFF-TOPIC Y ABUSO:** Si el usuario habla de temas completamente ajenos a danza o a la tienda (política, clima, temas personales profundos), redirigí amablemente: "Me encantaría charlar de todo, pero soy experta en danza! En qué te puedo ayudar con nuestros productos?". Si el usuario envía mensajes ofensivos, spam o contenido inapropiado, respondé una sola vez: "Estoy acá para ayudarte con lo que necesites de la tienda. Avisame cuando quieras consultar algo!" y no sigas el juego.
 8. **PRODUCTOS NO DISPONIBLES (BOTITAS, BOTAS, ZAPATILLAS DE JAZZ, ETC.):** Si el usuario pregunta por productos que NO forman parte del catálogo de Pointe Coach (ej: botitas, botas de danza, zapatillas de jazz, zapatillas de tap, zapatillas de flamenco, calzado de contemporáneo, u otros artículos fuera del rubro ballet/punta), NO uses ninguna tool de búsqueda. Informá directamente que ese producto no está disponible en la tienda y ofrecé alternativas del catálogo real (ej: media punta, puntas, medias, accesorios). Ejemplo de respuesta: "Ese producto no lo manejamos por acá, pero te puedo mostrar opciones de [categoría alternativa] si querés!".
+10. **VISITAS AL LOCAL, RETIROS Y RESERVAS (DERIVACIÓN OBLIGATORIA — INNEGOCIABLE):** El local NO tiene atención espontánea garantizada: TODA visita, retiro o reserva la coordina el equipo humano. Si detectás CUALQUIER intención presencial, dejá de hacer cualquier otra cosa y derivá.
+
+   **DISPARADORES (lista NO exhaustiva — usá tu criterio):** "puedo pasar por el local", "paso por ahí", "mañana paso", "estarás?", "van a estar?", "hay alguien?", "a qué hora abren/atienden", "puedo ir a verlas", "puedo ir a probarme", "voy a retirar", "retiro por el local", "me lo reservás/apartás/guardás para pasar", "llevo a mi hija", "nos encontramos", o cualquier mención de ir, pasar, visitar, retirar o encontrarse en persona.
+
+   **ACCIÓN OBLIGATORIA (sin excepción):**
+   (1) NUNCA confirmes que puede pasar, ni horarios de atención, ni que va a haber alguien, ni digas "te esperamos".
+   (2) NUNCA confirmes reservas de productos para retirar (eso lo coordina el equipo).
+   (3) NO uses la dirección como invitación a ir ("te esperamos en..."). Solo podés mencionarla como dato si la piden explícitamente, sin confirmar visita.
+   (4) Ejecutá `derivhumano` INMEDIATAMENTE con reason="Clienta quiere visitar el local / retirar / reservar" e incluí en summary qué quiere y cuándo.
+   (5) Respondé SOLO con: "Para coordinar tu visita al local te vamos a contactar con una asesora del equipo, que te confirma día y horario! En breve se comunica con vos."
+   (6) Si la derivación ya se hizo en turnos anteriores (lo ves en el historial) y el usuario insiste, NO derives de nuevo: confirmá que ya están notificadas y en breve la contactan.
 
 ## PRIMERA INTERACCIÓN (SALUDO Cálido)
 

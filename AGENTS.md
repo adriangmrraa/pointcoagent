@@ -106,6 +106,13 @@ Las 3 barreras anti-alucinacion originales (Regla de Veracidad + Gate Absoluto +
 
 ---
 
+## Visitas al Local / Retiros / Reservas (Regla 10 - NUEVO 2026-07)
+
+- CUALQUIER intencion presencial ("puedo pasar?", "estaras?", "voy a retirar", "me lo reservas para pasar") dispara `derivhumano` INMEDIATAMENTE, igual que fitting y pagos.
+- PROHIBIDO: confirmar visitas/horarios/presencia, decir "te esperamos", confirmar reservas para retirar, usar la direccion como invitacion.
+- Mensaje unico de cierre: "Para coordinar tu visita al local te vamos a contactar con una asesora del equipo, que te confirma dia y horario! En breve se comunica con vos."
+- Origen: una clienta fue al local tras confirmacion del bot, sin conocimiento de la dueña.
+
 ## Fitting (Solo Puntas) - Protocolo Completo
 
 - **Puede:** Proponer fitting y derivar con `derivhumano`.
