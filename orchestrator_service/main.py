@@ -28,6 +28,10 @@ current_conversation_id: ContextVar[Optional[uuid.UUID]] = ContextVar("current_c
 current_customer_phone: ContextVar[Optional[str]] = ContextVar("current_customer_phone", default=None)
 # URLs devueltas por tools en el turno actual: son las ÚNICAS que el bot puede enviar.
 current_turn_allowed_urls: ContextVar[Optional[set]] = ContextVar("current_turn_allowed_urls", default=None)
+# Idempotencia de la derivacion DENTRO de un mismo turno: derivhumano manda mail
+# y bloquea la conversacion 24h, asi que ejecutarla dos veces spamea al equipo.
+# Pasa si el modelo la llama en paralelo o si /chat reintenta por fuga de internals.
+current_turn_handoff_result: ContextVar[Optional[str]] = ContextVar("current_turn_handoff_result", default=None)
 
 # Initialize earlys
 load_dotenv()
@@ -800,6 +804,13 @@ async def derivhumano(reason: str, contact_name: Optional[str] = None, contact_p
     if not tid or not cid:
         return "Error: Context not initialized for handoff."
 
+    # Ya se derivo en ESTE turno: se devuelve el mismo resultado sin mandar otro
+    # mail ni re-bloquear. El modelo recibe igual las instrucciones de cierre.
+    ya_derivado = current_turn_handoff_result.get()
+    if ya_derivado:
+        logger.info("handoff_skipped_already_done_this_turn", cid=str(cid), reason=reason)
+        return ya_derivado
+
     # 1. Resolve Handoff Settings (ENV First, then DB)
     target_email = HANDOFF_EMAIL
     h_smtp_host = SMTP_HOST
@@ -873,8 +884,10 @@ Tienda: {store_name}
         
         logger.info("handoff_email_sent_smtp", to=target_email, host=h_smtp_host, locking_cid=cid)
 
-        return f"Handoff SUCCESSFUL. AI LOCKED. Manda el mensaje de cierre según el motivo: (1) Para FITTING/PUNTAS, usá: '➡Te derivamos con una asesora (FITTER), que esta capacitada para que encuentres la mejor punta que se adecue a TU PIE 🩰 en breve se contacta con vos.' (2) Para PEDIDOS, usá: 'Fijate que ya te contacto con mis compañeras para que te ayuden con tu orden #... y sepas exactamente el estado.' (3) Para VISITAS AL LOCAL / RETIROS / RESERVAS, usá: 'Para coordinar tu visita al local te vamos a contactar con una asesora del equipo, que te confirma día y horario! En breve se comunica con vos.' NUNCA confirmes horario ni digas te esperamos. (4) Para OTROS (ayuda general, quejas, pedido de humano), usá un mensaje cálido y coherente con lo que pidió el usuario."
-            
+        exito = f"Handoff SUCCESSFUL. AI LOCKED. Manda el mensaje de cierre según el motivo: (1) Para FITTING/PUNTAS, usá: '➡Te derivamos con una asesora (FITTER), que esta capacitada para que encuentres la mejor punta que se adecue a TU PIE 🩰 en breve se contacta con vos.' (2) Para PEDIDOS, usá: 'Fijate que ya te contacto con mis compañeras para que te ayuden con tu orden #... y sepas exactamente el estado.' (3) Para VISITAS AL LOCAL / RETIROS / RESERVAS, usá: 'Para coordinar tu visita al local te vamos a contactar con una asesora del equipo, que te confirma día y horario! En breve se comunica con vos.' NUNCA confirmes horario ni digas te esperamos. (4) Para OTROS (ayuda general, quejas, pedido de humano), usá un mensaje cálido y coherente con lo que pidió el usuario."
+        current_turn_handoff_result.set(exito)
+        return exito
+
     except Exception as e:
         logger.error("handoff_email_failed", error=str(e))
         await log_db("error", "handoff_email_failed", str(e), {"tid": tid, "cid": str(cid)})
@@ -1465,6 +1478,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     current_conversation_id.set(conv_id)
     current_customer_phone.set(event.from_number)
     current_turn_allowed_urls.set(set())
+    current_turn_handoff_result.set(None)
     
     # Distributed Lock (Prevent Race Conditions per number)
     lock_key = f"lock:{event.from_number}"

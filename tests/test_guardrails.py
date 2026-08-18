@@ -167,3 +167,23 @@ def test_fallback_de_fuga_no_expone_nada_tecnico():
     bajo = TOOL_LEAK_FALLBACK_TEXT.lower()
     for palabra in ("json", "tool", "error", "function", "sistema interno"):
         assert palabra not in bajo
+
+
+def test_retry_hint_pide_no_repetir_tools_ya_ejecutadas():
+    # Sin esto, el reintento por fuga puede hacer que derivhumano mande
+    # un segundo mail al equipo. La guarda dura vive en main.py
+    # (current_turn_handoff_result); esta es la capa blanda.
+    from guardrails import TOOL_LEAK_RETRY_HINT
+    bajo = TOOL_LEAK_RETRY_HINT.lower()
+    assert "no la repitas" in bajo
+    assert '{"messages": [...]}' in TOOL_LEAK_RETRY_HINT
+
+
+def test_el_fallback_de_fuga_sobrevive_al_guardrail_de_urls():
+    # Si el guardrail filtrara el propio fallback, la clienta no recibiria NADA.
+    from guardrails import TOOL_LEAK_FALLBACK_TEXT
+    msgs = [{"text": TOOL_LEAK_FALLBACK_TEXT, "imageUrl": None}]
+    kept, blocked = filter_outbound_messages(msgs, set(), "https://www.pointecoach.shop")
+    assert len(kept) == 1
+    assert kept[0]["text"] == TOOL_LEAK_FALLBACK_TEXT
+    assert blocked == []

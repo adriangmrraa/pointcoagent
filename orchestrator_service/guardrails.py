@@ -131,7 +131,9 @@ TOOL_LEAK_RETRY_HINT = (
     "SISTEMA: tu último output fue una invocación de herramienta ESCRITA COMO TEXTO. "
     "Eso es un error: si necesitás una herramienta, invocala de verdad (tool call). "
     'El contenido que devolvés SIEMPRE tiene que ser el JSON {"messages": [...]} '
-    "dirigido a la clienta, nunca la llamada a la herramienta."
+    "dirigido a la clienta, nunca la llamada a la herramienta. "
+    "Si en este turno YA ejecutaste una herramienta de verdad, NO la repitas: "
+    "escribí directamente el mensaje para la clienta con los datos que ya tenés."
 )
 
 
