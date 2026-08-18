@@ -662,6 +662,21 @@ def _register_turn_urls(obj):
     except Exception as e:
         logger.error("turn_url_registry_error", error=str(e))
 
+def get_cached_tool_for_turn(key: str):
+    """Lee la cache Y registra las URLs como permitidas para este turno.
+
+    `_register_turn_urls` vive dentro de `call_tiendanube_api`, asi que un HIT de
+    cache devolvia temprano y salteaba el registro: el guardrail no reconocia
+    links ni imagenes de productos REALES devueltos en ese mismo turno y los
+    borraba. Visto en prod el 2026-07-23: la misma busqueda 'Media punta' a los
+    151s (TTL 180s) contesto sin fotos ni links de los 3 productos.
+    """
+    cached = get_cached_tool(key)
+    if cached is not None:
+        _register_turn_urls(cached)
+    return cached
+
+
 async def call_tiendanube_api(endpoint: str, params: dict = None):
     # Retrieve credentials STRICTLY from Environment Variables (as requested)
     store_id = GLOBAL_TN_STORE_ID
@@ -713,7 +728,7 @@ async def search_specific_products(q: str):
     3. Filter by color/size internally by checking the 'variants' field in the output.
     Input 'q' is the keyword."""
     cache_key = f"productsq:{q}"
-    cached = get_cached_tool(cache_key)
+    cached = get_cached_tool_for_turn(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
@@ -724,7 +739,7 @@ async def search_by_category(category: str, keyword: str):
     """Search for products by category and keyword in Tienda Nube. Returns top 3 results simplified."""
     q = f"{category} {keyword}"
     cache_key = f"search_by_category:{category}:{keyword}"
-    cached = get_cached_tool(cache_key)
+    cached = get_cached_tool_for_turn(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
@@ -734,7 +749,7 @@ async def search_by_category(category: str, keyword: str):
 async def browse_general_storefront():
     """Browse the generic storefront (latest items). Use ONLY for vague requests like 'what do you have?' or 'show me catalogue'. DO NOT USE for specific items."""
     cache_key = "productsall"
-    cached = get_cached_tool(cache_key)
+    cached = get_cached_tool_for_turn(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"per_page": 9})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
@@ -776,7 +791,7 @@ async def search_by_store_category(category_name: str):
         # Fallback: si no se encontró la categoría, búsqueda por texto normal.
         return await call_tiendanube_api("/products", {"q": category_name, "per_page": 15})
     cache_key = f"cat_products:{cid}"
-    cached = get_cached_tool(cache_key)
+    cached = get_cached_tool_for_turn(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"category_id": cid, "per_page": 20})
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
