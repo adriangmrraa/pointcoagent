@@ -48,7 +48,14 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 
 from db import db
 from catalog import is_product_available, available_variant_values, pick_category_id
-from guardrails import collect_urls, filter_outbound_messages, FALLBACK_TEXT
+from guardrails import (
+    collect_urls,
+    filter_outbound_messages,
+    detect_internal_leak,
+    FALLBACK_TEXT,
+    TOOL_LEAK_FALLBACK_TEXT,
+    TOOL_LEAK_RETRY_HINT,
+)
 from llm_provider import resolve_llm_provider
 
 # Configuration & Environment
@@ -1151,6 +1158,14 @@ MAPA DE CATEGORÍAS (Usar para búsquedas proactivas):
 ```
 
 **IMPORTANT: Output strict JSON only. No strings attached.**
+
+**LAS HERRAMIENTAS NO SE ESCRIBEN, SE INVOCAN.** El JSON de arriba es lo unico
+que la clienta va a leer. Si necesitas una herramienta (derivhumano, busquedas,
+orders, cupones_list), invocala por el canal de tools; NUNCA la escribas dentro
+del contenido. Esta PROHIBIDO que aparezcan en tu respuesta claves como
+"tool_uses", "tool_calls", "recipient_name", "function_call", "parameters" o
+nombres tipo "functions.derivhumano". Si ya ejecutaste la tool, tu contenido es
+solo el mensaje humano para la clienta.
 """
     # 5. Initialize Prompt and LLM
     prompt = ChatPromptTemplate.from_messages([
@@ -1466,8 +1481,32 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     try:
         inputs = {"input": event.text, "chat_history": chat_history}
         result = await executor.ainvoke(inputs)
-        output = result["output"] 
-        
+        output = result["output"]
+
+        # --- ANTI-FUGA DE INTERNALS (2026-08) ---
+        # El modelo a veces ESCRIBE la llamada a la tool como texto JSON en vez
+        # de emitirla como tool_call (caso real: una clienta recibio por WhatsApp
+        # el JSON de `functions.derivhumano`). Se reintenta una vez con un aviso
+        # explicito; si insiste, se corta con un mensaje seguro. Nunca sale crudo.
+        leak = detect_internal_leak(output)
+        if leak:
+            logger.warning("internal_tool_call_leaked", reason=leak, conv_id=str(conv_id), attempt=1)
+            await log_db("warn", "internal_tool_call_leaked", leak, {"correlation_id": correlation_id})
+            retry_history = chat_history + [
+                AIMessage(content=str(output)[:500]),
+                HumanMessage(content=TOOL_LEAK_RETRY_HINT),
+            ]
+            result = await executor.ainvoke({"input": event.text, "chat_history": retry_history})
+            output = result["output"]
+            leak = detect_internal_leak(output)
+            if leak:
+                logger.error("internal_tool_call_leaked_after_retry", reason=leak, conv_id=str(conv_id))
+                await log_db("error", "internal_tool_call_leaked", f"persistio tras reintento: {leak}", {"correlation_id": correlation_id})
+                output = json.dumps(
+                    {"messages": [{"text": TOOL_LEAK_FALLBACK_TEXT, "imageUrl": None}]},
+                    ensure_ascii=False,
+                )
+
         # --- Smart Output Processing (Layer 2) ---
         final_messages = []
         
@@ -1493,8 +1532,10 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
                  if "text" in output:
                      final_messages = [OrchestratorMessage(text=str(output["text"]), part=output.get("part", 1), total=output.get("total", 1))]
                  else:
-                     # Last resort: Stringify
-                     final_messages = [OrchestratorMessage(text=json.dumps(output, ensure_ascii=False), part=1, total=1)]
+                     # Antes: se volcaba el dict crudo como texto (asi se fugo el JSON
+                     # de tool_uses a una clienta). Estructura desconocida = fallback.
+                     logger.warning("unknown_output_shape_dict", keys=list(output.keys())[:8])
+                     final_messages = [OrchestratorMessage(text=TOOL_LEAK_FALLBACK_TEXT, part=1, total=1)]
                      
         # Case C: String (maybe JSON string)
         elif isinstance(output, str):
@@ -1569,7 +1610,11 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
                                 imageUrl=sanitize_url(m.get("imageUrl") or m.get("image_url"))
                              ))
                 else:
-                    final_messages = [OrchestratorMessage(text=json.dumps(parsed_json, indent=2, ensure_ascii=False))]
+                    # Antes: json.dumps(parsed_json, indent=2) -> ESTA linea fue la que
+                    # imprimio el JSON interno en el WhatsApp de la clienta. El JSON
+                    # crudo nunca es una respuesta valida para el cliente.
+                    logger.warning("unknown_output_shape_json", sample=str(parsed_json)[:200])
+                    final_messages = [OrchestratorMessage(text=TOOL_LEAK_FALLBACK_TEXT)]
 
             except json.JSONDecodeError:
                 # 4. JSON Failed -> It's just text
@@ -1630,8 +1675,15 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     except Exception as e:
         # Nota: antes este bloque usaba `log` (inexistente) y una tabla que puede no existir,
         # con lo cual el error real quedaba enmascarado por un NameError.
-        logger.error("chat_unexpected_error", error=str(e), from_number=event.from_number)
-        await log_db("error", "chat_unexpected_error", str(e), {"correlation_id": correlation_id})
+        err_txt = str(e)
+        # Un 401 del proveedor deja al bot MUDO (send=False) y antes se perdia
+        # entre errores genericos. Se etiqueta aparte para poder alertar sobre el.
+        low = err_txt.lower()
+        if "401" in err_txt or "user not found" in low or "invalid_api_key" in low or "no auth credentials" in low:
+            logger.error("llm_auth_failed", error=err_txt, model=LLM_MODEL, from_number=event.from_number)
+            await log_db("error", "llm_auth_failed", err_txt, {"correlation_id": correlation_id, "model": LLM_MODEL})
+        logger.error("chat_unexpected_error", error=err_txt, from_number=event.from_number)
+        await log_db("error", "chat_unexpected_error", err_txt, {"correlation_id": correlation_id})
         return OrchestratorResult(status="error", send=False, meta={"error": str(e)})
     finally:
         if acquired:

@@ -107,3 +107,63 @@ if __name__ == "__main__":
                 print(f"  FAIL {name}: {e}")
     print(f"\n{'TODO OK' if fallos == 0 else str(fallos) + ' FALLOS'}")
     sys.exit(1 if fallos else 0)
+
+
+# --- Fuga de internals (caso real 2026-08) ---------------------------------
+
+import json
+
+from guardrails import detect_internal_leak, TOOL_LEAK_FALLBACK_TEXT
+
+# Payload textual EXACTO que recibio una clienta por WhatsApp.
+FUGA_REAL = json.dumps({
+    "tool_uses": [{
+        "recipient_name": "functions.derivhumano",
+        "parameters": {
+            "reason": "Clienta quiere visitar el local / retirar / reservar",
+            "contact_name": "Lorena Almiron",
+            "summary": "Quiere comprar puntas para su hija Lourdes, calza 40.",
+        },
+    }]
+}, ensure_ascii=False)
+
+
+def test_detecta_la_fuga_real_de_whatsapp():
+    assert detect_internal_leak(FUGA_REAL) is not None
+
+
+def test_detecta_la_fuga_ya_parseada_como_dict():
+    assert detect_internal_leak(json.loads(FUGA_REAL)) is not None
+
+
+def test_detecta_tool_call_truncado_sin_json_valido():
+    truncado = '{"tool_uses": [{"recipient_name": "functions.search_specific_produ'
+    assert detect_internal_leak(truncado) is not None
+
+
+def test_detecta_formato_tool_calls_y_function_call():
+    assert detect_internal_leak({"tool_calls": [{"name": "orders"}]}) is not None
+    assert detect_internal_leak({"function_call": {"name": "cupones_list"}}) is not None
+    assert detect_internal_leak('{"action": "orders", "action_input": {"id": "1"}}') is not None
+
+
+def test_respuesta_normal_no_es_fuga():
+    ok = json.dumps({"messages": [
+        {"text": "Hola! Como estas? Te muestro las puntas que tenemos:", "imageUrl": None},
+        {"text": "Mochilas Pointe Coach\nPrecio: $40000\nVariantes: Gris, Negro",
+         "imageUrl": "https://dcdn-us.mitiendanube.com/stores/006/mochila.jpg"},
+    ]}, ensure_ascii=False)
+    assert detect_internal_leak(ok) is None
+
+
+def test_texto_de_clienta_con_palabras_parecidas_no_es_fuga():
+    # Falsos positivos: la clienta puede escribir cualquier cosa.
+    assert detect_internal_leak("Necesito puntas, mi hija calza 40. Me pasas los parameters?") is None
+    assert detect_internal_leak({"messages": [{"text": "Que funciones tiene la mochila?"}]}) is None
+    assert detect_internal_leak(None) is None
+
+
+def test_fallback_de_fuga_no_expone_nada_tecnico():
+    bajo = TOOL_LEAK_FALLBACK_TEXT.lower()
+    for palabra in ("json", "tool", "error", "function", "sistema interno"):
+        assert palabra not in bajo

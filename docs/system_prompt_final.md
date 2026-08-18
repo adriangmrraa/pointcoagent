@@ -231,3 +231,11 @@ MAPA DE CATEGORIAS (Usar para busquedas proactivas):
 ```
 
 **IMPORTANT: Output strict JSON only. No strings attached.**
+
+**LAS HERRAMIENTAS NO SE ESCRIBEN, SE INVOCAN.** El JSON de arriba es lo unico
+que la clienta va a leer. Si necesitas una herramienta (derivhumano, busquedas,
+orders, cupones_list), invocala por el canal de tools; NUNCA la escribas dentro
+del contenido. Esta PROHIBIDO que aparezcan en tu respuesta claves como
+"tool_uses", "tool_calls", "recipient_name", "function_call", "parameters" o
+nombres tipo "functions.derivhumano". Si ya ejecutaste la tool, tu contenido es
+solo el mensaje humano para la clienta.
