@@ -127,3 +127,130 @@ if __name__ == "__main__":
                 print(f"  FAIL {name}: {e}")
     print(f"\n{'TODO OK' if fallos == 0 else str(fallos) + ' FALLOS'}")
     sys.exit(1 if fallos else 0)
+
+
+# --- Busqueda ampliada (caso real 2026-07-23: "elasticos Grishko") ----------
+
+from catalog import sin_acentos, query_terms, name_match_score, rank_widened_results
+
+# Nombres REALES traidos de la API de Tienda Nube el 2026-08-18 con q="Grishko"
+# (19 resultados; el que la clienta queria estaba en el puesto 13).
+GRISHKO_REAL = [
+    "Zapatillas de Puntas Grishko 3007 PRO",
+    "Zapatillas de Puntas Grishko 3007 PRO FLEX",
+    "Zapatillas de Puntas Grishko DREAM POINTE",
+    "Zapatillas de Puntas Grishko STREAM POINTE",
+    "Zapatillas de Puntas Grishko STAR POINTE",
+    "Punteras Moleskin Grishko",
+    "Punteras de tela Grishko",
+    "Punteras de Silicona Grishko",
+    "Calcetines SOCKS Grishko",
+    "Zapatillas Mediapuntas Dream Stretch Grishko",
+    "Bolso Grishko",
+    "Leotardo para danza ELLA Grishko",
+    "Cintas Elastizadas Grishko",
+    "Cuerito para plataforma de Zapatillas de Puntas tamaño PEQUEÑO",
+    "Cuerito para Plataforma Zapatillas de Puntas tamaño GRANDE",
+    "Leotardo para danza EFFIE Grishko",
+    "Leotardo para danza SIA Grishko",
+    "Leotardo para danza SIBA Grishko",
+    "Protector de Puntas Grishko",
+]
+# Los 2 que devuelve q="Elasticos" (ninguno es Grishko).
+ELASTICOS_REAL = ["Elásticos Bolt Bunheads Capezio",
+                  "Elásticos ACANALADOS PARA ZAPATILLAS DE PUNTAS"]
+
+
+def _prods(nombres):
+    return [{"id": i, "name": n} for i, n in enumerate(nombres)]
+
+
+def test_el_caso_real_queda_primero():
+    # Union de ambas busquedas por termino suelto, en el orden en que las
+    # devuelve la API. Sin re-ranking, "Cintas Elastizadas Grishko" queda 13ro.
+    union = _prods(ELASTICOS_REAL + GRISHKO_REAL)
+    top = rank_widened_results("Elásticos Grishko", union)
+    assert top[0]["name"] == "Cintas Elastizadas Grishko"
+
+
+def test_el_prefijo_puentea_elasticos_con_elastizadas():
+    terminos = query_terms("Elásticos Grishko")
+    assert name_match_score("Cintas Elastizadas Grishko", terminos) == 2
+    assert name_match_score("Zapatillas de Puntas Grishko 3007 PRO", terminos) == 1
+    assert name_match_score("Elásticos Bolt Bunheads Capezio", terminos) == 1
+
+
+def test_descarta_lo_que_no_matchea_ningun_termino():
+    union = _prods(["Cintas Elastizadas Grishko", "Leotardo Maria SO DANCA"])
+    top = rank_widened_results("Elásticos Grishko", union)
+    assert [p["name"] for p in top] == ["Cintas Elastizadas Grishko"]
+
+
+def test_no_reordena_arbitrariamente_los_empates():
+    # Las 3 matchean 'punteras' + 'grishko': empatan, y se conserva el orden en
+    # que las devolvio la API en vez de reordenarlas de forma arbitraria.
+    union = _prods(["Punteras Moleskin Grishko", "Punteras de tela Grishko",
+                    "Punteras de Silicona Grishko"])
+    top = rank_widened_results("punteras gel Grishko", union)
+    assert [p["name"] for p in top] == ["Punteras Moleskin Grishko",
+                                        "Punteras de tela Grishko",
+                                        "Punteras de Silicona Grishko"]
+
+
+def test_la_marca_sola_no_alcanza_para_entrar():
+    # Pidio elasticos: un bolso Grishko matchea la marca pero no es lo que pidio.
+    union = _prods(["Bolso Grishko", "Protector de Puntas Grishko"])
+    assert rank_widened_results("Elásticos Grishko", union) == []
+
+
+def test_si_la_consulta_es_solo_marca_no_se_exige_tipo():
+    # "algo de Grishko": no hay termino de tipo con que filtrar, se deja pasar.
+    union = _prods(["Bolso Grishko", "Punteras Moleskin Grishko"])
+    top = [p["name"] for p in rank_widened_results("Grishko Capezio", union)]
+    assert top == ["Bolso Grishko", "Punteras Moleskin Grishko"]
+
+
+def test_respeta_el_limite():
+    assert len(rank_widened_results("Grishko puntas", _prods(GRISHKO_REAL), limite=5)) == 5
+
+
+def test_normalizacion_de_terminos():
+    assert sin_acentos("Elásticos") == "elasticos"
+    # Las stopwords no cuentan como termino (si contaran, "de"/"para" matchearian todo).
+    assert query_terms("cintas de saten para puntas") == ["cintas", "saten", "puntas"]
+    assert query_terms("") == []
+
+
+def test_una_sola_palabra_no_se_amplia():
+    # Con un termino la ampliacion no puede aportar nada: main.py corta antes.
+    assert len(query_terms("Grishko")) == 1
+
+
+def test_entradas_raras_no_explotan():
+    assert rank_widened_results("Elásticos Grishko", []) == []
+    assert rank_widened_results("", _prods(GRISHKO_REAL)) == []
+    assert rank_widened_results("Elásticos Grishko", None) == []
+    assert rank_widened_results("Elásticos Grishko", [None, "basura", {"name": None}]) == []
+
+
+def test_no_mezcla_punteras_cuando_piden_leotardo():
+    # Regresion real detectada en la validacion contra la API: con ranking por
+    # corte entraban punteras y spacers Capezio junto a los leotardos, porque
+    # matchean 'capezio'. Solo debe quedar el tier maximo.
+    union = _prods([
+        "Leotardo para danza ELLA Grishko",
+        "Maillot Heloisa So Danca | Leotardo para Danza con Encaje",
+        "Punteras de Tela Cozy Toes Capezio Americano",
+        "Super Spacers Bunheads Capezio",
+    ])
+    top = [p["name"] for p in rank_widened_results("leotardo negro Capezio", union)]
+    assert all("Puntera" not in n and "Spacers" not in n for n in top), top
+    assert len(top) == 2
+
+
+def test_solo_sobrevive_el_que_matchea_mas_terminos():
+    union = _prods(["Cintas Elastizadas Grishko",       # 2 terminos
+                    "Elásticos Bolt Bunheads Capezio",  # 1
+                    "Bolso Grishko"])                   # 1
+    top = [p["name"] for p in rank_widened_results("Elásticos Grishko", union)]
+    assert top == ["Cintas Elastizadas Grishko"]

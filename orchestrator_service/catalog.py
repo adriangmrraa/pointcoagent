@@ -82,3 +82,109 @@ def available_variant_values(variants) -> list:
                     seen.add(s)
                     ordered.append(s)
     return ordered
+
+
+# --- BUSQUEDA AMPLIADA (2026-08) -------------------------------------------
+# El buscador de Tienda Nube exige que TODOS los terminos aparezcan en el NOMBRE
+# del producto. Caso real 2026-07-23: una clienta pidio "elasticos Grishko", el
+# modelo busco q="Elasticos Grishko" y dio 0 porque el producto se llama "Cintas
+# Elastizadas Grishko" (tiene Grishko, no tiene Elasticos). El bot contesto "no
+# tenemos" y la venta la cerro una humana a mano 1 hora despues.
+#
+# Cuando la busqueda exacta vuelve vacia se reintenta por termino suelto y se
+# unen los resultados. El problema es el ORDEN: "Grishko" solo devuelve 19
+# productos y el que ella queria esta en el puesto 13, fuera de lo que el modelo
+# mira. Por eso se re-ordena por cuantos terminos de la consulta original
+# aparecen en el nombre, comparando por PREFIJO: asi "elast" matchea tanto
+# "Elasticos" como "Elastizadas", y "Cintas Elastizadas Grishko" -que matchea
+# los dos terminos- queda primero.
+
+import unicodedata
+
+_STOPWORDS = {"de", "del", "la", "el", "los", "las", "para", "con", "sin",
+              "y", "o", "un", "una", "por", "en", "al"}
+
+_LARGO_PREFIJO = 5
+_LARGO_MINIMO = 3
+
+
+def sin_acentos(texto) -> str:
+    """minusculas y sin tildes: 'Elásticos' -> 'elasticos'."""
+    if not texto:
+        return ""
+    desarmado = unicodedata.normalize("NFD", str(texto).lower())
+    return "".join(c for c in desarmado if unicodedata.category(c) != "Mn")
+
+
+def query_terms(query) -> list:
+    """Terminos utiles de la consulta, sin stopwords ni duplicados."""
+    limpio = "".join(c if c.isalnum() else " " for c in sin_acentos(query))
+    terminos = []
+    for t in limpio.split():
+        if len(t) >= _LARGO_MINIMO and t not in _STOPWORDS and t not in terminos:
+            terminos.append(t)
+    return terminos
+
+
+def _prefijo(termino) -> str:
+    return termino[:_LARGO_PREFIJO]
+
+
+def name_match_score(nombre, terminos) -> int:
+    """Cuantos terminos de la consulta aparecen en el nombre (por prefijo)."""
+    objetivo = sin_acentos(nombre)
+    palabras = "".join(c if c.isalnum() else " " for c in objetivo).split()
+    score = 0
+    for t in terminos:
+        p = _prefijo(t)
+        if any(w.startswith(p) for w in palabras):
+            score += 1
+    return score
+
+
+# Marcas reales de la tienda (categorias bajo "Marcas" en Tienda Nube, 2026-08).
+# Una marca SOLA no alcanza para que un producto entre: si alguien pide
+# "leotardo negro Capezio", una puntera Capezio matchea la marca pero no es lo
+# que pidio. Si se suma una marca nueva y no se agrega aca, lo unico que pasa es
+# que el filtro afloja para esa marca: no se rompe nada.
+MARCAS_TIENDA = {"grishko", "capezio", "sansha", "danca", "bunheads",
+                 "pointe", "coach"}
+
+
+def rank_widened_results(query, productos, limite=6, marcas=None) -> list:
+    """Se queda SOLO con los que matchean la mayor cantidad de terminos.
+
+    Precision antes que cantidad, a proposito. Un corte por ranking devolvia
+    basura: con "leotardo negro Capezio" entraban punteras y spacers Capezio
+    (matchean 'capezio') mezclados con los leotardos. Mostrarle almohadillas a
+    quien pidio una malla es peor que no mostrarle nada.
+
+    Quedandose con el tier maximo, "Elasticos Grishko" devuelve exactamente
+    "Cintas Elastizadas Grishko" (unico que matchea los dos terminos), y
+    "leotardo negro Capezio" devuelve solo leotardos. Los empates conservan el
+    orden en que los devolvio la API (sort estable).
+    """
+    terminos = query_terms(query)
+    if not terminos or not isinstance(productos, list):
+        return []
+
+    prefijos_marca = {_prefijo(m) for m in (MARCAS_TIENDA if marcas is None else marcas)}
+    sin_marca = [t for t in terminos if _prefijo(t) not in prefijos_marca]
+    # Si la consulta es SOLO marcas ("algo de Grishko"), no hay con que exigir mas.
+    exigir_tipo = bool(sin_marca)
+
+    puntuados = []
+    for p in productos:
+        if not isinstance(p, dict):
+            continue
+        nombre = p.get("name") or ""
+        score = name_match_score(nombre, terminos)
+        if score == 0:
+            continue
+        if exigir_tipo and name_match_score(nombre, sin_marca) == 0:
+            continue  # matchea solo la marca: no es lo que pidieron
+        puntuados.append((score, p))
+    if not puntuados:
+        return []
+    mejor = max(score for score, _ in puntuados)
+    return [p for score, p in puntuados if score == mejor][:limite]

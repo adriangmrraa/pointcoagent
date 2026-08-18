@@ -51,7 +51,13 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from db import db
-from catalog import is_product_available, available_variant_values, pick_category_id
+from catalog import (
+    is_product_available,
+    available_variant_values,
+    pick_category_id,
+    query_terms,
+    rank_widened_results,
+)
 from guardrails import (
     collect_urls,
     filter_outbound_messages,
@@ -719,6 +725,43 @@ async def call_tiendanube_api(endpoint: str, params: dict = None):
         await log_db("error", "external_api_error", f"TiendaNube API failed: {endpoint}", {"error": str(e)})
         return f"Request Error: {str(e)}"
 
+NOTA_BUSQUEDA_AMPLIADA = (
+    "OJO: NO hay ningun producto cuyo nombre tenga todos esos terminos juntos. "
+    "Esta lista es una busqueda AMPLIADA por termino suelto, ordenada de mas a "
+    "menos parecido. Decile a la clienta que eso exacto no lo tenes y ofrecele "
+    "lo mas parecido de aca; NO se lo presentes como si fuera lo que pidio."
+)
+
+
+async def buscar_ampliado(q: str):
+    """Reintento por termino suelto cuando la busqueda exacta vuelve vacia.
+
+    Tienda Nube exige que TODOS los terminos esten en el NOMBRE del producto, asi
+    que "Elasticos Grishko" da 0 aunque exista "Cintas Elastizadas Grishko". Se
+    busca cada termino por separado, se unen los resultados y se re-ordenan por
+    cuantos terminos matchean (ver rank_widened_results en catalog.py).
+
+    Devuelve None si no hay nada que ampliar: el caller conserva su resultado.
+    """
+    terminos = query_terms(q)[:3]
+    if len(terminos) < 2:
+        return None  # un solo termino: ampliar no puede agregar nada
+    vistos, union = set(), []
+    for termino in terminos:
+        parcial = await call_tiendanube_api("/products", {"q": termino, "per_page": 30})
+        if not isinstance(parcial, list):
+            continue
+        for prod in parcial:
+            pid = prod.get("id")
+            if pid is not None and pid not in vistos:
+                vistos.add(pid)
+                union.append(prod)
+    if not union:
+        return None
+    rankeados = rank_widened_results(q, union)
+    return rankeados or None
+
+
 @tool
 async def search_specific_products(q: str):
     """SEARCH for specific products by name, category, or brand. REQUIRED for queries like 'medias', 'zapatillas', 'puntas', 'grishko'. 
@@ -731,6 +774,12 @@ async def search_specific_products(q: str):
     cached = get_cached_tool_for_turn(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
+    if isinstance(result, list) and not result:
+        ampliado = await buscar_ampliado(q)
+        if ampliado:
+            logger.info("busqueda_ampliada", q=q, encontrados=len(ampliado))
+            return {"busqueda_exacta_sin_resultados": q, "nota": NOTA_BUSQUEDA_AMPLIADA,
+                    "productos": ampliado}
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
     return result
 
@@ -742,6 +791,12 @@ async def search_by_category(category: str, keyword: str):
     cached = get_cached_tool_for_turn(cache_key)
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
+    if isinstance(result, list) and not result:
+        ampliado = await buscar_ampliado(q)
+        if ampliado:
+            logger.info("busqueda_ampliada", q=q, encontrados=len(ampliado))
+            return {"busqueda_exacta_sin_resultados": q, "nota": NOTA_BUSQUEDA_AMPLIADA,
+                    "productos": ampliado}
     if isinstance(result, (dict, list)): set_cached_tool(cache_key, result, ttl=180)
     return result
 
