@@ -1,4 +1,5 @@
 import os
+import asyncio
 import json
 import hashlib
 import time
@@ -746,11 +747,17 @@ async def buscar_ampliado(q: str):
     terminos = query_terms(q)[:3]
     if len(terminos) < 2:
         return None  # un solo termino: ampliar no puede agregar nada
+    # En paralelo: secuencial sumaba hasta 30s (3 llamados x 10s de timeout) a un
+    # turno que ya tarda 12-26s. gather conserva el orden de `terminos`, asi que
+    # el desempate del ranking no cambia.
+    respuestas = await asyncio.gather(*[
+        call_tiendanube_api("/products", {"q": t, "per_page": 30}) for t in terminos
+    ], return_exceptions=True)
+
     vistos, union = set(), []
-    for termino in terminos:
-        parcial = await call_tiendanube_api("/products", {"q": termino, "per_page": 30})
+    for parcial in respuestas:
         if not isinstance(parcial, list):
-            continue
+            continue  # error, timeout o excepcion: se ignora ese termino
         for prod in parcial:
             pid = prod.get("id")
             if pid is not None and pid not in vistos:
