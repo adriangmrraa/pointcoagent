@@ -1498,6 +1498,9 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     correlation_id = event.correlation_id or str(uuid.uuid4())
     content = event.text or "" # Can be empty if just image
     
+    # Se guarda el id: el historial de abajo tiene que EXCLUIR este mensaje, que ya
+    # viaja aparte como "input". Si no, el modelo lo ve dos veces.
+    inbound_msg_id = uuid.uuid4()
     await db.pool.execute("""
         INSERT INTO chat_messages (
             id, tenant_id, conversation_id, role, content, 
@@ -1506,7 +1509,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             $1, (SELECT tenant_id FROM chat_conversations WHERE id=$2), $2, 'user', $3,
             $4, NOW(), $5, $6, $7
         )
-    """, uuid.uuid4(), conv_id, content, correlation_id, message_type, media_id, event.from_number)
+    """, inbound_msg_id, conv_id, content, correlation_id, message_type, media_id, event.from_number)
     
     # Update Conversation Metadata
     preview_text = content[:50] if content else f"[{message_type}]"
@@ -1516,13 +1519,25 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
         WHERE id = $2
     """, preview_text, conv_id)
 
+    # Los ULTIMOS 20 mensajes, devueltos en orden cronologico.
+    #
+    # Antes decia "ORDER BY created_at ASC LIMIT 20", que trae los 20 mas VIEJOS.
+    # Como hay una sola conversacion por numero para siempre (constraint UNIQUE
+    # sobre tenant+channel+external_user_id), la memoria de toda clienta que
+    # vuelve quedaba congelada en sus primeros 20 mensajes historicos: cuanto mas
+    # antigua la clienta, mas viejo el contexto. Caso real 2026-08: una clienta
+    # saludo con "hola, como estas?" y el bot le contesto ofreciendole opciones
+    # "para el viernes", de una conversacion de semanas atras.
     history_rows = await db.pool.fetch("""
-        SELECT role, content 
-        FROM chat_messages 
-        WHERE conversation_id = $1 
-        ORDER BY created_at ASC 
-        LIMIT 20
-    """, conv_id)
+        SELECT role, content FROM (
+            SELECT role, content, created_at
+            FROM chat_messages
+            WHERE conversation_id = $1 AND id <> $2
+            ORDER BY created_at DESC
+            LIMIT 20
+        ) AS recientes
+        ORDER BY created_at ASC
+    """, conv_id, inbound_msg_id)
     
     chat_history = []
     for h in history_rows:
