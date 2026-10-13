@@ -913,10 +913,6 @@ async def derivhumano(reason: str, contact_name: Optional[str] = None, contact_p
         logger.warning("handoff_config_incomplete", email=bool(target_email), host=bool(h_smtp_host))
         return "Error: Handoff configuration (SMTP or Target Email) is incomplete. Please check environment variables (HANDOFF_EMAIL, SMTP_HOST, etc.)."
 
-    # Se marca ACA, antes del primer await: si se marcara recien al final, dos
-    # tools en paralelo pasarian las dos el chequeo de arriba y saldrian 2 mails.
-    mark_once(HANDOFF_ONCE, "Derivacion EN CURSO en este mismo turno: NO vuelvas a llamar derivhumano, escribi directamente el mensaje de cierre para la clienta.")
-
     # 2. Build Content
     wa_id = cphone or contact_phone or "Oculto"
     user_name = contact_name or 'No especificado'
@@ -942,6 +938,12 @@ Tienda: {store_name}
 
     # 3. SMTP Send
     try:
+        # La marca va ACA: antes del primer await -si se marcara al final, dos
+        # tools en paralelo pasarian las dos el chequeo de arriba y saldrian dos
+        # mails- y DENTRO del try, para que cualquier error la limpie y la
+        # derivacion se pueda reintentar en el mismo turno.
+        mark_once(HANDOFF_ONCE, "Derivacion EN CURSO en este mismo turno: NO vuelvas a llamar derivhumano, escribi directamente el mensaje de cierre para la clienta.")
+
         msg = MIMEText(body)
         msg['Subject'] = subject
         msg['From'] = h_smtp_user

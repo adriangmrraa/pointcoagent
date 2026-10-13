@@ -159,3 +159,32 @@ def test_sin_reset_no_explota():
     assert get_once("cualquiera") is None
     assert mark_once("cualquiera", "x") == "x"
     clear_once("cualquiera")
+
+
+def test_si_revienta_antes_del_envio_la_marca_no_queda_pegada():
+    # La marca se pone dentro del try. Si algo falla entre la marca y el envio,
+    # el except la limpia y la derivacion se puede reintentar en el mismo turno.
+    intentos = []
+
+    async def derivhumano(revienta):
+        if get_once(HANDOFF):
+            return "ya derivado"
+        try:
+            mark_once(HANDOFF, "en curso")
+            intentos.append(1)
+            if revienta:
+                raise RuntimeError("fallo armando el mail")
+            await asyncio.sleep(0)
+            return mark_once(HANDOFF, "exito")
+        except Exception:
+            clear_once(HANDOFF)
+            return "error"
+
+    async def main():
+        reset_turn()
+        return await derivhumano(True), await derivhumano(False)
+
+    primero, segundo = asyncio.run(main())
+    assert primero == "error"
+    assert segundo == "exito", "la marca quedo pegada y bloqueo el reintento"
+    assert len(intentos) == 2
