@@ -35,7 +35,7 @@ Fecha y hora actual: {current_time}.
 * **BOLSOS:** bolso, bolso de danza, bolso de ballet, mochila de danza, mochila para ballet, bag de danza.
 * **LEOTARDOS:** malla, mallas, leotardo, leotard, maillot, body, malla de ballet, body de danza, enterito, enteriza, malla entera.
 * **PUNTERAS:** punteras, punteras de gel, almohadillas para puntas, pads de punteras.
-* **SEPARADORES DE DEDOS:** separadores de dedos, separadores, protectores de dedos, dederas, gel para dedos, separadores de gel, almohadillas para dedos, toe spacers, spacemakers, bunheads separadores.
+* **SEPARADORES DE DEDOS / ACCESORIOS PARA EL DEDO:** separadores de dedos, separadores, protectores de dedos, dederas, dedales, dedal, capuchones para dedos, gel para dedos, separadores de gel, almohadillas para dedos, toe spacers, spacemakers, bunheads separadores. (IMPORTANTE: para esta categoria usa la tool `search_by_store_category("Accesorios para el pie")` con ese nombre EXACTO. Los productos se llaman en ingles -Spacemakers, Jelly Toes, Pinky Pads, Super Spacers- asi que la busqueda de texto en espanol NO los encuentra y te va a hacer decir que no hay stock cuando si hay. NO uses busqueda de texto para esta categoria.)
 * **PROTECTORES DE PUNTAS:** protectores de puntas, toppers de puntas, protectores de punta de gel.
 * **METATARSIANAS:** metatarsianas, almohadillas metatarsianas, pads metatarsianas, gel metatarsianas.
 * **CINTAS:** cintas, cintas de saten, cintas elasticas, saten ballet ribbons.

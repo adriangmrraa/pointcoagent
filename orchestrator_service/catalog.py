@@ -55,7 +55,39 @@ def pick_category_id(categories, name):
         cn = ((c.get("name") or {}).get("es") or "").strip().lower()
         if cn and cn == target:
             return c.get("id")
-    # 2. Coincidencia parcial
+    # 2. Por solapamiento de palabras: gana la categoria que comparte MAS
+    #    terminos con lo pedido.
+    #
+    #    Antes esto era un "contiene" que devolvia la PRIMERA coincidencia de la
+    #    lista, y la lista trae las genericas antes que las especificas: pedir
+    #    "Accesorios del pie" caia en "Accesorios" (26 productos) en vez de en
+    #    "Accesorios para el pie" (6, los que de verdad buscaban). Comparar por
+    #    palabras hace que gane la especifica sin depender del orden.
+    pedidos = set(query_terms(target))
+    mejor_id, mejor_score, mejor_largo = None, 0, 0
+    for c in categories:
+        if not isinstance(c, dict):
+            continue
+        cn = ((c.get("name") or {}).get("es") or "").strip().lower()
+        if not cn:
+            continue
+        propios = set(query_terms(cn))
+        score = len(pedidos & propios)
+        # La categoria tiene que cubrir TODOS los terminos pedidos, no apenas
+        # uno. Con solapamiento parcial, "Zapatillas de tap" caia en "Zapatillas
+        # de punta" por compartir "zapatillas" -> ofrecerle puntas de $230.000 a
+        # alguien que pidio zapatillas de tap. Mejor devolver None y que la tool
+        # caiga a busqueda de texto.
+        if score == 0 or score < len(pedidos):
+            continue
+        # Mas terminos en comun gana. A igualdad, el nombre mas corto: es el
+        # match menos diluido (ej. "Punteras" sobre "Protectores de puntas").
+        if score > mejor_score or (score == mejor_score and len(cn) < mejor_largo):
+            mejor_id, mejor_score, mejor_largo = c.get("id"), score, len(cn)
+    if mejor_id is not None:
+        return mejor_id
+
+    # 3. Ultima red: el "contiene" original, por si los terminos no cruzan.
     for c in categories:
         if not isinstance(c, dict):
             continue

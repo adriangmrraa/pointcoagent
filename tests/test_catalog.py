@@ -254,3 +254,58 @@ def test_solo_sobrevive_el_que_matchea_mas_terminos():
                     "Bolso Grishko"])                   # 1
     top = [p["name"] for p in rank_widened_results("Elásticos Grishko", union)]
     assert top == ["Cintas Elastizadas Grishko"]
+
+
+# --- Resolucion de categoria (caso Luisina, 2026-10-13) --------------------
+
+# Nombres REALES de las categorias de la tienda, en el orden en que los
+# devuelve la API (las genericas vienen ANTES que las especificas: ese orden
+# era justamente el que rompia el "contiene" original).
+CATEGORIAS_REALES = [
+    {"id": 39583323, "name": {"es": "Nuevos Ingresos"}},
+    {"id": 34838994, "name": {"es": "Zapatillas de punta"}},
+    {"id": 35012375, "name": {"es": "Zapatillas de media punta"}},
+    {"id": 34839607, "name": {"es": "Medias"}},
+    {"id": 35828958, "name": {"es": "Metatarsianas"}},
+    {"id": 35012479, "name": {"es": "Accesorios"}},
+    {"id": 35012482, "name": {"es": "Elásticos"}},
+    {"id": 35012483, "name": {"es": "Cintas de satén y elastizadas"}},
+    {"id": 35012485, "name": {"es": "Accesorios para el pie"}},
+    {"id": 35012486, "name": {"es": "Punteras"}},
+    {"id": 35012487, "name": {"es": "Protectores de puntas"}},
+    {"id": 34839644, "name": {"es": "Bolsos"}},
+]
+
+
+def test_el_nombre_exacto_gana_siempre():
+    assert pick_category_id(CATEGORIAS_REALES, "Accesorios para el pie") == 35012485
+    assert pick_category_id(CATEGORIAS_REALES, "Accesorios") == 35012479
+    assert pick_category_id(CATEGORIAS_REALES, "Bolsos") == 34839644
+    assert pick_category_id(CATEGORIAS_REALES, "Punteras") == 35012486
+
+
+def test_variante_del_nombre_cae_en_la_especifica_no_en_la_generica():
+    # Regresion real: "Accesorios del pie" devolvia "Accesorios" (26 productos)
+    # porque la generica aparece antes en la lista. Debe ganar la especifica.
+    assert pick_category_id(CATEGORIAS_REALES, "Accesorios del pie") == 35012485
+    assert pick_category_id(CATEGORIAS_REALES, "accesorios para el pie") == 35012485
+
+
+def test_no_confunde_punteras_con_protectores_de_puntas():
+    # Son categorias distintas y el diccionario del prompt las separa a proposito.
+    assert pick_category_id(CATEGORIAS_REALES, "Punteras") == 35012486
+    assert pick_category_id(CATEGORIAS_REALES, "Protectores de puntas") == 35012487
+
+
+def test_categoria_inexistente_devuelve_none():
+    # Sin match, la tool cae a busqueda de texto; nunca debe inventar una categoria.
+    assert pick_category_id(CATEGORIAS_REALES, "Zapatillas de tap") is None
+    assert pick_category_id(CATEGORIAS_REALES, "") is None
+    assert pick_category_id(CATEGORIAS_REALES, None) is None
+    assert pick_category_id([], "Bolsos") is None
+    assert pick_category_id(None, "Bolsos") is None
+
+
+def test_entradas_rotas_no_explotan():
+    sucias = [None, "basura", {"id": 1}, {"name": None}, {"name": {"es": None}}]
+    assert pick_category_id(sucias, "Bolsos") is None

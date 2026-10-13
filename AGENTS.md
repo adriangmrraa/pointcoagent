@@ -56,6 +56,9 @@ El agente tiene una personalidad estricta definida en `sys_template`:
 ### Herramientas (Tools) - Nombres Exactos
 - `search_specific_products`: Busqueda general por keyword.
 - `search_by_category`: Busqueda filtrada por categoria.
+- `search_by_store_category`: Lista una CATEGORIA REAL de Tienda Nube por nombre EXACTO. **Obligatoria en dos casos**, porque la busqueda de texto falla con ellos:
+  - `"Bolsos"` -> trae bolsos Y mochilas juntos (las mochilas no contienen "bolso" en el nombre).
+  - `"Accesorios para el pie"` -> separadores, protectores y dedales. Los productos se llaman en ingles (Spacemakers, Jelly Toes, Pinky Pads, Super Spacers), asi que ninguna busqueda en espanol los encuentra. Caso real 2026-10-13: una clienta pidio "dedales" y el bot contesto "no tenemos separadores de dedos" teniendo 6 productos con stock, uno de ellos con la frase "separadores de dedos" en su propia descripcion.
 - `browse_general_storefront`: Ultimo recurso (catalogo general) y para consultas vagas.
 - `cupones_list`: Promociones vigentes.
 - `orders`: Consulta de pedido (ID sin #).
@@ -75,7 +78,7 @@ El agente DEBE mapear terminos coloquiales a categorias base antes de llamar a c
 | BOLSOS | mochila de danza, bag de danza |
 | LEOTARDOS | malla, maillot, body, enterito, enteriza |
 | PUNTERAS | punteras de gel, almohadillas para puntas, pads de punteras |
-| SEPARADORES DE DEDOS | separadores de dedos, protectores de dedos, dederas, separadores de gel, almohadillas para dedos, toe spacers |
+| SEPARADORES DE DEDOS | separadores de dedos, protectores de dedos, dederas, **dedales**, separadores de gel, almohadillas para dedos, toe spacers |
 | PROTECTORES DE PUNTAS | toppers de puntas, protectores de punta de gel |
 | METATARSIANAS | almohadillas metatarsianas, pads |
 | CINTAS | cintas de saten, cintas elasticas |
