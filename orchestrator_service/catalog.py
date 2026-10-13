@@ -36,6 +36,32 @@ def is_product_available(product) -> bool:
     return any(variant_has_stock(v) for v in variants)
 
 
+# Formas de pedir una categoria que la busqueda de texto NO puede resolver, y a
+# que categoria REAL corresponden. Existe porque los productos para el dedo estan
+# nombrados en ingles (Spacemakers, Jelly Toes, Pinky Pads, Super Spacers): si el
+# modelo manda "Separadores de dedos", que no es una categoria real, hoy se cae a
+# busqueda de texto, da 0, y el bot vuelve a decir "no tenemos" teniendo stock.
+_ALIAS_CATEGORIA = (
+    (("separador", "dedal", "dedo", "spacer", "spacemaker", "toe"), "Accesorios para el pie"),
+)
+
+
+def canonical_category_name(name):
+    """Lleva una forma coloquial de nombrar una categoria al nombre REAL.
+
+    Si no reconoce nada, devuelve el nombre tal cual: nunca inventa categorias.
+    """
+    if not name:
+        return name
+    terminos = query_terms(name)
+    if not terminos:
+        return name
+    for prefijos, real in _ALIAS_CATEGORIA:
+        if any(t.startswith(prefijos) for t in terminos):
+            return real
+    return name
+
+
 def pick_category_id(categories, name):
     """Resuelve el id de una categoría de Tienda Nube por su nombre (es).
 

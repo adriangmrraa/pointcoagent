@@ -309,3 +309,43 @@ def test_categoria_inexistente_devuelve_none():
 def test_entradas_rotas_no_explotan():
     sucias = [None, "basura", {"id": 1}, {"name": None}, {"name": {"es": None}}]
     assert pick_category_id(sucias, "Bolsos") is None
+
+
+# --- Alias de categoria (camino lateral del commit d27a8fb) ----------------
+
+from catalog import canonical_category_name
+
+
+def test_las_formas_de_pedir_dedos_van_a_la_categoria_real():
+    # Sin esto, "Separadores de dedos" no resuelve (no es categoria real), cae a
+    # busqueda de texto, da 0, y el bot repite el "no tenemos" del caso Luisina.
+    for pedido in ["Separadores de dedos", "separadores", "Dedales", "dedal",
+                   "Protectores de dedos", "toe spacers", "spacemakers"]:
+        assert canonical_category_name(pedido) == "Accesorios para el pie", pedido
+
+
+def test_no_toca_las_categorias_que_ya_resuelven():
+    for pedido in ["Bolsos", "Punteras", "Protectores de puntas", "Medias",
+                   "Accesorios para el pie", "Metatarsianas", "Leotardos"]:
+        assert canonical_category_name(pedido) == pedido, pedido
+
+
+def test_el_alias_no_se_traga_cosas_de_otra_categoria():
+    # "puntas" y "protectores de puntas" NO son accesorios para el dedo.
+    assert canonical_category_name("Zapatillas de punta") == "Zapatillas de punta"
+    assert canonical_category_name("Protectores de puntas") == "Protectores de puntas"
+    assert canonical_category_name("Zapatillas de tap") == "Zapatillas de tap"
+
+
+def test_entradas_vacias_pasan_sin_romper():
+    assert canonical_category_name("") == ""
+    assert canonical_category_name(None) is None
+    assert canonical_category_name("   ") == "   "
+
+
+def test_el_alias_llega_hasta_el_id_correcto():
+    # De punta a punta: nombre coloquial -> categoria real -> id.
+    assert pick_category_id(CATEGORIAS_REALES,
+                            canonical_category_name("Separadores de dedos")) == 35012485
+    assert pick_category_id(CATEGORIAS_REALES,
+                            canonical_category_name("Dedales")) == 35012485
