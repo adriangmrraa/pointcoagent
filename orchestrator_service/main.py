@@ -1076,8 +1076,8 @@ Fecha y hora actual: {current_time}.
 *   **MEDIAS:** medias, medias de ballet, medias de danza, medias convertibles, convertible socks, panty, pantymedia, cancan, cancanes, can can.
 *   **BOLSOS:** bolso, bolsos, bolso de danza, bolso de ballet, mochila, mochilas, mochila de danza, mochila para ballet, bag de danza. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Bolsos")`, que trae los bolsos Y las mochilas juntos. NO uses búsqueda de texto para bolsos/mochilas.)
 *   **LEOTARDOS:** malla, mallas, leotardo, leotard, maillot, body, malla de ballet, body de danza, enterito, enteriza, malla entera.
-*   **PUNTERAS:** punteras, punteras de gel, punteras de silicona, punteras de tela, almohadillas para puntas, pads de punteras. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Punteras")`. Las punteras son una categoría DISTINTA de "Accesorios para el pie" y NO comparten ni un producto: NUNCA busques punteras ahí.)
-*   **SEPARADORES DE DEDOS / ACCESORIOS PARA EL DEDO:** separadores de dedos, separadores, protectores de dedos, dederas, dedales, dedal, capuchones para dedos, gel para dedos, separadores de gel, almohadillas para dedos, toe spacers, spacemakers, bunheads separadores. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Accesorios para el pie")` con ese nombre EXACTO. Los productos se llaman en inglés -Spacemakers, Jelly Toes, Pinky Pads, Super Spacers- así que la búsqueda de texto en español NO los encuentra y te va a hacer decir que no hay stock cuando sí hay. NO uses búsqueda de texto para esta categoría.)
+*   **PUNTERAS:** punteras, punteras de gel, almohadillas para puntas, pads de punteras.
+*   **SEPARADORES DE DEDOS:** separadores de dedos, separadores, protectores de dedos, dederas, gel para dedos, separadores de gel, almohadillas para dedos, toe spacers, spacemakers, bunheads separadores.
 *   **PROTECTORES DE PUNTAS:** protectores de puntas, toppers de puntas, protectores de punta de gel.
 *   **METATARSIANAS:** metatarsianas, almohadillas metatarsianas, pads metatarsianas, gel metatarsianas.
 *   **CINTAS:** cintas, cintas de satén, cintas elásticas, satén ballet ribbons.
@@ -1201,7 +1201,7 @@ Los siguientes términos son AMBIGUOS porque pueden referirse a más de una cate
 1. `search_specific_products`: busca por keyword (q). q DEBE incluir categoría + marca/modelo.
 2. `search_by_category`: category + keyword.
 3. `browse_general_storefront`: USAR SIEMPRE para consultas vagas ("¿Qué tienen?", "Mostrame algo") o como último recurso. No repreguntar, mostrar productos.
-4. `search_by_store_category`: lista una CATEGORÍA REAL completa (input: nombre EXACTO de la categoría). Usar OBLIGATORIAMENTE en tres casos: "Bolsos" (trae bolsos Y mochilas juntos), "Accesorios para el pie" (separadores/protectores de dedos/dedales, que tienen nombre en inglés y no salen por texto) y "Punteras" (de gel, silicona o tela). Punteras y Accesorios para el pie son categorías distintas que no comparten productos: para punteras usá SIEMPRE "Punteras", nunca "Accesorios para el pie".
+4. `search_by_store_category`: lista una CATEGORÍA REAL completa (input: nombre, ej "Bolsos"). Usar OBLIGATORIAMENTE para bolsos/mochilas (trae ambos juntos).
 5. `cupones_list`: promos.
 6. `orders`: estado pedido (q=número).
 7. `derivhumano`: derivación.

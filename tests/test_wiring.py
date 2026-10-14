@@ -63,11 +63,22 @@ def test_derivhumano_consulta_la_guarda_antes_de_marcar():
     assert min(_lineas_llamando(deriv, "get_once")) < min(_lineas_llamando(deriv, "mark_once"))
 
 
-def test_derivhumano_limpia_la_marca_si_falla():
+def test_derivhumano_limpia_la_marca_solo_en_el_manejador_de_error():
+    # No alcanza con que clear_once exista en algun lado: tiene que estar DENTRO
+    # del except. Si alguien lo moviera al camino feliz, borraria la marca
+    # despues de mandar el mail y un segundo llamado mandaria otro.
     deriv = _funcion("derivhumano")
-    assert _lineas_llamando(deriv, "clear_once"), (
-        "sin clear_once, un fallo de SMTP deja la marca puesta y el equipo "
-        "nunca se entera de esa clienta")
+    en_except = []
+    for n in ast.walk(deriv):
+        if isinstance(n, ast.ExceptHandler):
+            en_except += _lineas_llamando(n, "clear_once")
+    todos = _lineas_llamando(deriv, "clear_once")
+    assert en_except, ("clear_once tiene que estar en el except: sin eso, un "
+                       "fallo de SMTP deja la marca puesta y el equipo nunca se "
+                       "entera de esa clienta")
+    assert todos == en_except, (
+        f"hay clear_once fuera del except (lineas {sorted(set(todos) - set(en_except))}): "
+        "borrar la marca en el camino feliz habilita un segundo mail")
 
 
 def test_el_contextvar_inerte_no_volvio():
@@ -92,12 +103,24 @@ def test_el_prompt_no_tiene_llaves_sueltas():
     assert sueltas <= {"{format_instructions}"}, f"placeholders inesperados: {sueltas}"
 
 
-def test_las_tres_categorias_obligatorias_estan_en_el_prompt():
-    # Punteras y Accesorios para el pie no comparten NI UN producto: si el
-    # prompt deja de nombrarlas, las consultas de punteras se van a la
-    # categoria equivocada (medido con el modelo real: 3 de 6 corridas).
+def test_el_prompt_solo_rutea_bolsos_por_categoria():
+    """Guarda contra reintroducir el ruteo por categoria sin evals.
+
+    Se intento (d27a8fb, 19385f0) y se revirtio: medido con el modelo real, la
+    instruccion enfatica de "Accesorios para el pie" arrastraba todo lo que
+    suena a accesorio de puntas, y el bot dejaba de encontrar el Endurecedor
+    SHOE GLUE (4/4) y la Bolsa de Malla MESH BAGS (4/4), que hoy SI encuentra.
+    Dos intentos de acotarla arreglaron un caso y rompieron otro.
+
+    Si alguien vuelve a instruirlo, que sea con un set de evals de ruteo
+    adelante. Este test existe para que ese cambio sea deliberado y no se
+    cuele: borralo en el mismo commit que suma las evals.
+    """
     texto = MAIN.read_text(encoding="utf-8")
-    for categoria in ('search_by_store_category("Bolsos")',
-                      'search_by_store_category("Accesorios para el pie")',
+    assert 'search_by_store_category("Bolsos")' in texto, (
+        "el ruteo de bolsos/mochilas es el unico probado en produccion")
+    for sin_evals in ('search_by_store_category("Accesorios para el pie")',
                       'search_by_store_category("Punteras")'):
-        assert categoria in texto, f"el prompt ya no instruye {categoria}"
+        assert sin_evals not in texto, (
+            f"el prompt volvio a instruir {sin_evals} sin evals de ruteo: "
+            "eso rompe endurecedor y bolsa de red, que hoy funcionan")

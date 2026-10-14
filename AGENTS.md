@@ -56,10 +56,10 @@ El agente tiene una personalidad estricta definida en `sys_template`:
 ### Herramientas (Tools) - Nombres Exactos
 - `search_specific_products`: Busqueda general por keyword.
 - `search_by_category`: Busqueda filtrada por categoria.
-- `search_by_store_category`: Lista una CATEGORIA REAL de Tienda Nube por nombre EXACTO. **Obligatoria en tres casos**:
-  - `"Bolsos"` -> trae bolsos Y mochilas juntos (las mochilas no contienen "bolso" en el nombre).
-  - `"Punteras"` -> punteras de gel, silicona o tela. **Es una categoria DISTINTA de "Accesorios para el pie" y no comparten ni un producto.** Sin esta instruccion el modelo manda las consultas de punteras a "Accesorios para el pie", donde no hay ninguna (verificado con el modelo real: 3 de 6 corridas).
-  - `"Accesorios para el pie"` -> separadores, protectores de dedos y dedales. Los productos se llaman en ingles (Spacemakers, Jelly Toes, Pinky Pads, Super Spacers), asi que ninguna busqueda en espanol los encuentra. Caso real 2026-10-13: una clienta pidio "dedales" y el bot contesto "no tenemos separadores de dedos" teniendo 6 productos con stock, uno de ellos con la frase "separadores de dedos" en su propia descripcion.
+- `search_by_store_category`: Lista una CATEGORIA REAL de Tienda Nube por nombre EXACTO. **Obligatoria solo para `"Bolsos"`** (trae bolsos Y mochilas juntas; las mochilas no contienen "bolso" en el nombre).
+  - **PENDIENTE, no instruido en el prompt:** los accesorios para el dedo (categoria `"Accesorios para el pie"`: Spacemakers, Jelly Toes, Pinky Pads, Super Spacers) y las `"Punteras"` tambien se resolverian mejor por categoria, porque los primeros estan nombrados en ingles y la busqueda de texto no los encuentra. **Caso real 2026-10-13:** una clienta pidio "dedales" y el bot contesto "no tenemos separadores de dedos" teniendo 6 productos con stock, uno con esa frase literal en su descripcion.
+  - **Por que no esta instruido todavia:** se probo (commits d27a8fb y 19385f0) y se revirtio. Medido con el modelo real, la instruccion enfatica arrastra todo lo que suena a accesorio de puntas: el bot dejaba de encontrar el Endurecedor SHOE GLUE (4/4) y la Bolsa de Malla MESH BAGS (4/4), que hoy SI encuentra. Dos intentos de acotarla arreglaron un caso y rompieron otro. **Requiere un set de evals de ruteo antes de reintentarlo.**
+  - El codigo que lo soporta YA esta: `canonical_category_name()` y el `pick_category_id()` por solapamiento de palabras en `catalog.py`. Falta solo la instruccion del prompt.
 - `browse_general_storefront`: Ultimo recurso (catalogo general) y para consultas vagas.
 - `cupones_list`: Promociones vigentes.
 - `orders`: Consulta de pedido (ID sin #).
@@ -79,7 +79,7 @@ El agente DEBE mapear terminos coloquiales a categorias base antes de llamar a c
 | BOLSOS | mochila de danza, bag de danza |
 | LEOTARDOS | malla, maillot, body, enterito, enteriza |
 | PUNTERAS | punteras de gel, almohadillas para puntas, pads de punteras |
-| SEPARADORES DE DEDOS | separadores de dedos, protectores de dedos, dederas, **dedales**, separadores de gel, almohadillas para dedos, toe spacers |
+| SEPARADORES DE DEDOS | separadores de dedos, protectores de dedos, dederas, dedales, separadores de gel, almohadillas para dedos, toe spacers |
 | PROTECTORES DE PUNTAS | toppers de puntas, protectores de punta de gel |
 | METATARSIANAS | almohadillas metatarsianas, pads |
 | CINTAS | cintas de saten, cintas elasticas |
