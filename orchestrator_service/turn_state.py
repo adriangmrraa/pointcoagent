@@ -32,6 +32,13 @@ def _estado():
     en vez de romper: peor que perder la idempotencia es tirar el turno."""
     estado = _turn.get()
     if estado is None:
+        # Camino no alcanzable hoy, pero si lo fuera la idempotencia se perderia
+        # EN SILENCIO (medido: 2 mails). Que quede en los logs.
+        try:
+            import structlog
+            structlog.get_logger().warning("turn_state_sin_reset")
+        except Exception:
+            pass
         estado = {}
         _turn.set(estado)
     return estado

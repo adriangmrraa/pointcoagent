@@ -171,8 +171,10 @@ def test_fallback_de_fuga_no_expone_nada_tecnico():
 
 def test_retry_hint_pide_no_repetir_tools_ya_ejecutadas():
     # Sin esto, el reintento por fuga puede hacer que derivhumano mande
-    # un segundo mail al equipo. La guarda dura vive en main.py
-    # (current_turn_handoff_result); esta es la capa blanda.
+    # un segundo mail al equipo. La guarda DURA vive en turn_state.py y se
+    # testea en test_turn_state.py; esta es solo la capa blanda. (El primer
+    # intento de guarda dura usaba un ContextVar reasignado y era inerte: este
+    # test pasaba igual, porque solo mira un string.)
     from guardrails import TOOL_LEAK_RETRY_HINT
     bajo = TOOL_LEAK_RETRY_HINT.lower()
     assert "no la repitas" in bajo

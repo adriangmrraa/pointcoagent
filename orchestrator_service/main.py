@@ -839,9 +839,6 @@ async def orders(q: str):
 
 async def resolve_category_id(name: str):
     """Resuelve el id de una categoría real de Tienda Nube por nombre (cacheado 1h)."""
-    # "Separadores de dedos" no es una categoria real: sin esto cae a busqueda de
-    # texto, da 0, y el bot repite el "no tenemos" que este arreglo vino a sacar.
-    name = canonical_category_name(name)
     cats = get_cached_tool("categories_all")
     if not cats:
         cats = await call_tiendanube_api("/categories", {"per_page": 100})
@@ -849,7 +846,18 @@ async def resolve_category_id(name: str):
             set_cached_tool("categories_all", cats, ttl=3600)
     if not isinstance(cats, list):
         return None
-    return pick_category_id(cats, name)
+    cid = pick_category_id(cats, name)
+    # El alias se aplica SOLO como rescate: si lo aplicaramos antes, le ganaria a
+    # palabras de otras categorias y "Punteras para dedos" terminaria en
+    # "Accesorios para el pie" en vez de en Punteras. Tambien rescata la caida en
+    # la categoria generica "Accesorios", que trae 26 productos mezclados.
+    if cid is None or cid == pick_category_id(cats, "Accesorios"):
+        alias = canonical_category_name(name)
+        if alias != name:
+            rescatado = pick_category_id(cats, alias)
+            if rescatado is not None:
+                cid = rescatado
+    return cid
 
 @tool
 async def search_by_store_category(category_name: str):
@@ -937,6 +945,7 @@ Tienda: {store_name}
 """
 
     # 3. SMTP Send
+    mail_enviado = False
     try:
         # La marca va ACA: antes del primer await -si se marcara al final, dos
         # tools en paralelo pasarian las dos el chequeo de arriba y saldrian dos
@@ -964,6 +973,8 @@ Tienda: {store_name}
                 server.login(h_smtp_user, h_smtp_pass)
                 server.send_message(msg)
         
+        mail_enviado = True
+
         # 4. Lock Conversation (24h)
         if cid:
              await db.pool.execute("""
@@ -981,7 +992,10 @@ Tienda: {store_name}
     except Exception as e:
         # Si el mail no salio hay que poder reintentar: sin esto, una segunda
         # llamada devolveria "exito" sin que el equipo se haya enterado de nada.
-        clear_once(HANDOFF_ONCE)
+        # Pero si YA salio y lo que fallo fue el UPDATE de la base, reintentar
+        # mandaria un segundo mail por la misma clienta.
+        if not mail_enviado:
+            clear_once(HANDOFF_ONCE)
         logger.error("handoff_email_failed", error=str(e))
         await log_db("error", "handoff_email_failed", str(e), {"tid": tid, "cid": str(cid)})
         return f"Error sending handoff email: {str(e)}"
@@ -1062,7 +1076,7 @@ Fecha y hora actual: {current_time}.
 *   **MEDIAS:** medias, medias de ballet, medias de danza, medias convertibles, convertible socks, panty, pantymedia, cancan, cancanes, can can.
 *   **BOLSOS:** bolso, bolsos, bolso de danza, bolso de ballet, mochila, mochilas, mochila de danza, mochila para ballet, bag de danza. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Bolsos")`, que trae los bolsos Y las mochilas juntos. NO uses búsqueda de texto para bolsos/mochilas.)
 *   **LEOTARDOS:** malla, mallas, leotardo, leotard, maillot, body, malla de ballet, body de danza, enterito, enteriza, malla entera.
-*   **PUNTERAS:** punteras, punteras de gel, almohadillas para puntas, pads de punteras.
+*   **PUNTERAS:** punteras, punteras de gel, punteras de silicona, punteras de tela, almohadillas para puntas, pads de punteras. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Punteras")`. Las punteras son una categoría DISTINTA de "Accesorios para el pie" y NO comparten ni un producto: NUNCA busques punteras ahí.)
 *   **SEPARADORES DE DEDOS / ACCESORIOS PARA EL DEDO:** separadores de dedos, separadores, protectores de dedos, dederas, dedales, dedal, capuchones para dedos, gel para dedos, separadores de gel, almohadillas para dedos, toe spacers, spacemakers, bunheads separadores. (IMPORTANTE: para esta categoría usá la tool `search_by_store_category("Accesorios para el pie")` con ese nombre EXACTO. Los productos se llaman en inglés -Spacemakers, Jelly Toes, Pinky Pads, Super Spacers- así que la búsqueda de texto en español NO los encuentra y te va a hacer decir que no hay stock cuando sí hay. NO uses búsqueda de texto para esta categoría.)
 *   **PROTECTORES DE PUNTAS:** protectores de puntas, toppers de puntas, protectores de punta de gel.
 *   **METATARSIANAS:** metatarsianas, almohadillas metatarsianas, pads metatarsianas, gel metatarsianas.
@@ -1187,7 +1201,7 @@ Los siguientes términos son AMBIGUOS porque pueden referirse a más de una cate
 1. `search_specific_products`: busca por keyword (q). q DEBE incluir categoría + marca/modelo.
 2. `search_by_category`: category + keyword.
 3. `browse_general_storefront`: USAR SIEMPRE para consultas vagas ("¿Qué tienen?", "Mostrame algo") o como último recurso. No repreguntar, mostrar productos.
-4. `search_by_store_category`: lista una CATEGORÍA REAL completa (input: nombre EXACTO de la categoría). Usar OBLIGATORIAMENTE en dos casos: "Bolsos" (trae bolsos Y mochilas juntos) y "Accesorios para el pie" (separadores/protectores/dedales, que tienen nombre en inglés y no salen por texto).
+4. `search_by_store_category`: lista una CATEGORÍA REAL completa (input: nombre EXACTO de la categoría). Usar OBLIGATORIAMENTE en tres casos: "Bolsos" (trae bolsos Y mochilas juntos), "Accesorios para el pie" (separadores/protectores de dedos/dedales, que tienen nombre en inglés y no salen por texto) y "Punteras" (de gel, silicona o tela). Punteras y Accesorios para el pie son categorías distintas que no comparten productos: para punteras usá SIEMPRE "Punteras", nunca "Accesorios para el pie".
 5. `cupones_list`: promos.
 6. `orders`: estado pedido (q=número).
 7. `derivhumano`: derivación.

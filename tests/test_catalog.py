@@ -349,3 +349,12 @@ def test_el_alias_llega_hasta_el_id_correcto():
                             canonical_category_name("Separadores de dedos")) == 35012485
     assert pick_category_id(CATEGORIAS_REALES,
                             canonical_category_name("Dedales")) == 35012485
+
+
+def test_el_alias_no_le_gana_a_una_categoria_que_si_resuelve():
+    # El alias se aplica solo como RESCATE. Si se aplicara antes, estas tres
+    # terminarian en "Accesorios para el pie" en vez de su categoria propia.
+    assert pick_category_id(CATEGORIAS_REALES, "Punteras") == 35012486
+    assert canonical_category_name("Punteras para dedos") == "Accesorios para el pie"
+    # pero "Punteras para dedos" SI resuelve sola, asi que el rescate no corre:
+    assert pick_category_id(CATEGORIAS_REALES, "Punteras para dedos") == 35012486

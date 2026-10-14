@@ -56,9 +56,10 @@ El agente tiene una personalidad estricta definida en `sys_template`:
 ### Herramientas (Tools) - Nombres Exactos
 - `search_specific_products`: Busqueda general por keyword.
 - `search_by_category`: Busqueda filtrada por categoria.
-- `search_by_store_category`: Lista una CATEGORIA REAL de Tienda Nube por nombre EXACTO. **Obligatoria en dos casos**, porque la busqueda de texto falla con ellos:
+- `search_by_store_category`: Lista una CATEGORIA REAL de Tienda Nube por nombre EXACTO. **Obligatoria en tres casos**:
   - `"Bolsos"` -> trae bolsos Y mochilas juntos (las mochilas no contienen "bolso" en el nombre).
-  - `"Accesorios para el pie"` -> separadores, protectores y dedales. Los productos se llaman en ingles (Spacemakers, Jelly Toes, Pinky Pads, Super Spacers), asi que ninguna busqueda en espanol los encuentra. Caso real 2026-10-13: una clienta pidio "dedales" y el bot contesto "no tenemos separadores de dedos" teniendo 6 productos con stock, uno de ellos con la frase "separadores de dedos" en su propia descripcion.
+  - `"Punteras"` -> punteras de gel, silicona o tela. **Es una categoria DISTINTA de "Accesorios para el pie" y no comparten ni un producto.** Sin esta instruccion el modelo manda las consultas de punteras a "Accesorios para el pie", donde no hay ninguna (verificado con el modelo real: 3 de 6 corridas).
+  - `"Accesorios para el pie"` -> separadores, protectores de dedos y dedales. Los productos se llaman en ingles (Spacemakers, Jelly Toes, Pinky Pads, Super Spacers), asi que ninguna busqueda en espanol los encuentra. Caso real 2026-10-13: una clienta pidio "dedales" y el bot contesto "no tenemos separadores de dedos" teniendo 6 productos con stock, uno de ellos con la frase "separadores de dedos" en su propia descripcion.
 - `browse_general_storefront`: Ultimo recurso (catalogo general) y para consultas vagas.
 - `cupones_list`: Promociones vigentes.
 - `orders`: Consulta de pedido (ID sin #).
