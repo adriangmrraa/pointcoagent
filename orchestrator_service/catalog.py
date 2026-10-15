@@ -42,7 +42,7 @@ def is_product_available(product) -> bool:
 # modelo manda "Separadores de dedos", que no es una categoria real, hoy se cae a
 # busqueda de texto, da 0, y el bot vuelve a decir "no tenemos" teniendo stock.
 _ALIAS_CATEGORIA = (
-    (("separador", "dedal", "dedo", "spacer", "spacemaker", "toe"), "Accesorios para el pie"),
+    (("separador", "dedal", "deder", "dedo", "spacer", "spacemaker", "toe"), "Accesorios para el pie"),
 )
 
 

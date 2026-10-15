@@ -774,6 +774,41 @@ async def buscar_ampliado(q: str):
     return rankeados or None
 
 
+async def buscar_por_categoria_equivalente(q: str):
+    """Ultimo recurso: resolver la consulta a una CATEGORIA real y traer eso.
+
+    Existe por los productos nombrados en INGLES. "separadores de dedos" y
+    "dedales" dan 0 por texto -los productos se llaman Spacemakers, Jelly Toes,
+    Pinky Pads, Super Spacers- y el bot termina diciendo "no tenemos" con 6
+    productos en stock, uno de ellos con la frase "Separadores de dedos" literal
+    en su propia descripcion. Caso real del 2026-10-13.
+
+    Va en el CODIGO y no en el prompt a proposito. Instruir al modelo a usar la
+    tool de categoria funcionaba para esto pero se arrastraba todo lo que suena
+    a accesorio de puntas: dejaba de encontrar el Endurecedor SHOE GLUE y la
+    Bolsa de Malla MESH BAGS, que hoy si encuentra (medido 4/4 con el modelo
+    real). Aca no puede pasar: **solo corre cuando la busqueda de texto ya
+    devolvio cero**, o sea donde la respuesta de hoy ya es "no tenemos".
+
+    `canonical_category_name` solo mapea lo que es irresoluble por texto, asi
+    que una consulta que no reconoce devuelve None y todo sigue igual.
+    """
+    equivalente = canonical_category_name(q)
+    if not equivalente or equivalente == q:
+        return None  # no hay categoria conocida para esto: se deja como estaba
+    # Se resuelve con el nombre CRUDO: resolve_category_id prueba primero la
+    # categoria real y recien despues el alias, asi "Punteras para dedos" cae en
+    # Punteras y no en Accesorios para el pie.
+    cid = await resolve_category_id(q)
+    if not cid:
+        return None
+    productos = await call_tiendanube_api("/products", {"category_id": cid, "per_page": 20})
+    if not isinstance(productos, list) or not productos:
+        return None
+    logger.info("rescate_por_categoria", q=q, categoria=equivalente, encontrados=len(productos))
+    return productos
+
+
 @tool
 async def search_specific_products(q: str):
     """SEARCH for specific products by name, category, or brand. REQUIRED for queries like 'medias', 'zapatillas', 'puntas', 'grishko'. 
@@ -787,6 +822,13 @@ async def search_specific_products(q: str):
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
     if isinstance(result, list) and not result:
+        # Primero la categoria, PERO solo si la consulta es de las que el texto no
+        # puede resolver (productos con nombre en ingles). Si no, la ampliada
+        # devuelve cualquier cosa parecida: "protectores de dedos" terminaba
+        # mostrando protectores de ZAPATILLAS, que no es lo que pidieron.
+        por_categoria = await buscar_por_categoria_equivalente(q)
+        if por_categoria:
+            return por_categoria
         ampliado = await buscar_ampliado(q)
         if ampliado:
             logger.info("busqueda_ampliada", q=q, encontrados=len(ampliado))
@@ -804,6 +846,13 @@ async def search_by_category(category: str, keyword: str):
     if cached: return cached
     result = await call_tiendanube_api("/products", {"q": q, "per_page": 15})
     if isinstance(result, list) and not result:
+        # Primero la categoria, PERO solo si la consulta es de las que el texto no
+        # puede resolver (productos con nombre en ingles). Si no, la ampliada
+        # devuelve cualquier cosa parecida: "protectores de dedos" terminaba
+        # mostrando protectores de ZAPATILLAS, que no es lo que pidieron.
+        por_categoria = await buscar_por_categoria_equivalente(q)
+        if por_categoria:
+            return por_categoria
         ampliado = await buscar_ampliado(q)
         if ampliado:
             logger.info("busqueda_ampliada", q=q, encontrados=len(ampliado))

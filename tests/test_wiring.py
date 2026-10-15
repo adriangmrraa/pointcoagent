@@ -124,3 +124,42 @@ def test_el_prompt_solo_rutea_bolsos_por_categoria():
         assert sin_evals not in texto, (
             f"el prompt volvio a instruir {sin_evals} sin evals de ruteo: "
             "eso rompe endurecedor y bolsa de red, que hoy funcionan")
+
+
+def _nombres_llamados(nodo):
+    return [n.func.id for n in ast.walk(nodo)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+
+
+def test_el_rescate_por_categoria_esta_en_las_busquedas_de_texto():
+    """El arreglo del caso Luisina vive en el CODIGO, no en el prompt.
+
+    Se intento desde el prompt (d27a8fb, 19385f0) y rompia el endurecedor y la
+    bolsa de red. Aca no puede: el rescate solo corre cuando la busqueda de
+    texto ya devolvio cero.
+    """
+    for tool in ("search_specific_products", "search_by_category"):
+        llamados = _nombres_llamados(_funcion(tool))
+        assert "buscar_por_categoria_equivalente" in llamados, (
+            f"{tool} perdio el rescate por categoria: 'dedales' vuelve a "
+            "contestar 'no tenemos' teniendo 6 productos con stock")
+
+
+def test_el_rescate_corre_antes_que_la_busqueda_ampliada():
+    # Si corriera despues, "protectores de dedos" se quedaria con el resultado
+    # de la ampliada, que devuelve protectores de ZAPATILLAS.
+    for tool in ("search_specific_products", "search_by_category"):
+        f = _funcion(tool)
+        rescate = min(_lineas_llamando(f, "buscar_por_categoria_equivalente"))
+        ampliada = min(_lineas_llamando(f, "buscar_ampliado"))
+        assert rescate < ampliada, f"{tool}: el rescate quedo despues de la ampliada"
+
+
+def test_el_rescate_solo_corre_con_la_busqueda_vacia():
+    # La garantia de que no puede romper nada de lo que hoy funciona.
+    import re
+    cuerpo = MAIN.read_text(encoding="utf-8")
+    for bloque in re.findall(r"if isinstance\(result, list\) and not result:(.*?)\n    if isinstance",
+                             cuerpo, re.S):
+        assert "buscar_por_categoria_equivalente" in bloque
+    assert cuerpo.count("if isinstance(result, list) and not result:") == 2

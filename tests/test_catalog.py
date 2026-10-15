@@ -358,3 +358,21 @@ def test_el_alias_no_le_gana_a_una_categoria_que_si_resuelve():
     assert canonical_category_name("Punteras para dedos") == "Accesorios para el pie"
     # pero "Punteras para dedos" SI resuelve sola, asi que el rescate no corre:
     assert pick_category_id(CATEGORIAS_REALES, "Punteras para dedos") == 35012486
+
+
+def test_todas_las_formas_de_pedir_accesorios_de_dedo():
+    # Las 6 formas que una clienta usa de verdad. Todas tienen que llegar a la
+    # categoria: por texto dan 0 porque los productos se llaman en ingles.
+    for pedido in ["dedales", "dedal", "separadores de dedos", "separadores",
+                   "protectores de dedos", "dederas", "almohadillas para dedos",
+                   "toe spacers", "spacemakers", "gel para dedos"]:
+        assert canonical_category_name(pedido) == "Accesorios para el pie", pedido
+
+
+def test_lo_que_el_texto_SI_encuentra_no_se_toca():
+    # Estos se resuelven por busqueda de texto y el rescate no debe activarse:
+    # son justo los que se rompian cuando esto se intento desde el prompt.
+    for pedido in ["Endurecedor de puntas", "Bolsa de red", "Bolsa de malla",
+                   "Punteras", "punteras de gel", "protectores de puntas",
+                   "Medias", "Leotardos", "Bolsos", "Cintas", "Metatarsianas"]:
+        assert canonical_category_name(pedido) == pedido, pedido
