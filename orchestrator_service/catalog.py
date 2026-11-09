@@ -46,6 +46,31 @@ _ALIAS_CATEGORIA = (
 )
 
 
+# Palabras con las que las clientas piden algo que el catalogo nombra DISTINTO,
+# y que no se arreglan por categoria porque la categoria real es demasiado amplia.
+# Caso: los pollerines viven en "Indumentaria", junto con leotardos y mallas, asi
+# que rutear ahi traeria ropa mezclada. El sinonimo de busqueda es mas preciso.
+# Solo se usa cuando la busqueda de texto ya devolvio CERO.
+_ALIAS_BUSQUEDA = (
+    (("poller", "fald"), "pollerin"),
+)
+
+
+def search_term_alias(q):
+    """Termino con el que SI se encuentra lo que la clienta pidio, o None.
+
+    "pollerita" y "falda" dan 0 en Tienda Nube; el producto se llama "Pollerin
+    SO DANCA". Devuelve None si no reconoce nada: nunca inventa una busqueda.
+    """
+    if not q:
+        return None
+    terminos = query_terms(q)
+    for prefijos, real in _ALIAS_BUSQUEDA:
+        if any(t.startswith(prefijos) for t in terminos):
+            return real if real not in terminos else None
+    return None
+
+
 def canonical_category_name(name):
     """Lleva una forma coloquial de nombrar una categoria al nombre REAL.
 

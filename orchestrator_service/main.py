@@ -58,6 +58,7 @@ from catalog import (
     available_variant_values,
     canonical_category_name,
     pick_category_id,
+    search_term_alias,
     query_terms,
     rank_widened_results,
 )
@@ -829,6 +830,14 @@ async def search_specific_products(q: str):
         por_categoria = await buscar_por_categoria_equivalente(q)
         if por_categoria:
             return por_categoria
+        # Mismo criterio, un escalon mas fino: el producto existe pero se llama
+        # distinto a como lo pidieron ("pollerita"/"falda" -> "pollerin").
+        sinonimo = search_term_alias(q)
+        if sinonimo:
+            por_sinonimo = await call_tiendanube_api("/products", {"q": sinonimo, "per_page": 15})
+            if isinstance(por_sinonimo, list) and por_sinonimo:
+                logger.info("rescate_por_sinonimo", q=q, termino=sinonimo, encontrados=len(por_sinonimo))
+                return por_sinonimo
         ampliado = await buscar_ampliado(q)
         if ampliado:
             logger.info("busqueda_ampliada", q=q, encontrados=len(ampliado))
@@ -853,6 +862,14 @@ async def search_by_category(category: str, keyword: str):
         por_categoria = await buscar_por_categoria_equivalente(q)
         if por_categoria:
             return por_categoria
+        # Mismo criterio, un escalon mas fino: el producto existe pero se llama
+        # distinto a como lo pidieron ("pollerita"/"falda" -> "pollerin").
+        sinonimo = search_term_alias(q)
+        if sinonimo:
+            por_sinonimo = await call_tiendanube_api("/products", {"q": sinonimo, "per_page": 15})
+            if isinstance(por_sinonimo, list) and por_sinonimo:
+                logger.info("rescate_por_sinonimo", q=q, termino=sinonimo, encontrados=len(por_sinonimo))
+                return por_sinonimo
         ampliado = await buscar_ampliado(q)
         if ampliado:
             logger.info("busqueda_ampliada", q=q, encontrados=len(ampliado))

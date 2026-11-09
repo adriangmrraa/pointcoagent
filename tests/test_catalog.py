@@ -376,3 +376,30 @@ def test_lo_que_el_texto_SI_encuentra_no_se_toca():
                    "Punteras", "punteras de gel", "protectores de puntas",
                    "Medias", "Leotardos", "Bolsos", "Cintas", "Metatarsianas"]:
         assert canonical_category_name(pedido) == pedido, pedido
+
+
+# --- Sinonimo de busqueda (caso Carolina, 2026-11-09) ----------------------
+
+from catalog import search_term_alias
+
+
+def test_las_formas_de_pedir_una_pollera_llegan_al_pollerin():
+    # "pollerita" y "falda" dan CERO en Tienda Nube; el producto se llama
+    # "Pollerin SO DANCA". Con vision, el modelo lee la foto y busca "Pollerita"
+    # o "Falda de danza": sin esto seguiria contestando "no tenemos".
+    for pedido in ["pollerita", "Pollerita", "falda", "faldita", "Falda de danza",
+                   "pollera de gasa"]:
+        assert search_term_alias(pedido) == "pollerin", pedido
+
+
+def test_no_se_busca_a_si_mismo():
+    # Si la consulta ya dice "pollerin", el rescate no tiene nada que aportar.
+    assert search_term_alias("pollerin") is None
+    assert search_term_alias("pollerin negro") is None
+
+
+def test_el_sinonimo_no_se_traga_otras_consultas():
+    for pedido in ["dedales", "punteras", "zapatillas de tap", "medias", "leotardo",
+                   "bolsos", "endurecedor", "bolsa de red", ""]:
+        assert search_term_alias(pedido) is None, pedido
+    assert search_term_alias(None) is None
