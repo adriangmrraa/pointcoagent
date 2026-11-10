@@ -666,6 +666,39 @@ def simplify_product(p):
         "imageUrl": image_url
     }
 
+IMAGENES_POR_TURNO = 2  # mas de 2 fotos en un turno no aportan y encarecen
+
+ADJUNTO_NO_LEIBLE = (
+    "[La clienta adjuntó un archivo que NO podés ver. No adivines de qué se "
+    "trata: preguntale qué necesita, o derivá si corresponde.]"
+)
+
+
+def construir_turno_cliente(texto, imagenes):
+    """El mensaje de la clienta tal como lo ve el modelo: texto + sus fotos.
+
+    Antes la foto llegaba como un mensaje VACIO -`content = event.text or ""`- y
+    el bot ni sabia que existia, asi que adivinaba. Caso real 2026-11-09: una
+    clienta reenvio la ficha de un pollerin preguntando si tenia elastico en la
+    cintura; el bot le ofrecio elasticos para zapatillas de punta y despues un
+    leotardo de $86.000.
+
+    Si la foto es un comprobante, el modelo lo ve y aplica la regla de pagos de
+    siempre: lo reconoce, lo dice y deriva.
+    """
+    bloques = []
+    if texto:
+        bloques.append({"type": "text", "text": texto})
+    for url in (imagenes or [])[:IMAGENES_POR_TURNO]:
+        bloques.append({"type": "image_url", "image_url": {"url": url}})
+    if not bloques:
+        bloques.append({"type": "text", "text": ADJUNTO_NO_LEIBLE})
+    # Un solo bloque de texto no necesita el formato multimodal.
+    if len(bloques) == 1 and bloques[0]["type"] == "text":
+        return [HumanMessage(content=bloques[0]["text"])]
+    return [HumanMessage(content=bloques)]
+
+
 def _register_turn_urls(obj):
     """Registra las URLs devueltas por una tool como permitidas para este turno."""
     try:
@@ -1357,7 +1390,10 @@ solo el mensaje humano para la clienta.
     prompt = ChatPromptTemplate.from_messages([
         SystemMessage(content=sys_template),
         MessagesPlaceholder(variable_name="chat_history"),
-        ("user", "{input}"),
+        # Antes era ("user", "{input}"), un template de STRING: si el turno de la
+        # clienta traia texto + imagen, la lista se convertia a str SIN dar error
+        # y la foto no llegaba nunca al modelo. Con el placeholder se preserva.
+        MessagesPlaceholder(variable_name="input"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ]).partial(format_instructions=parser.get_format_instructions())
 
@@ -1581,6 +1617,10 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     # Handle Media if present
     media_id = None
     message_type = "text"
+    imagenes_del_turno = [
+        mm.url for mm in (event.media or [])
+        if (mm.type or "").lower() == "image" and mm.url
+    ]
     if event.media and len(event.media) > 0:
         m = event.media[0] # Assuming single media per message for now
         message_type = m.type
@@ -1681,7 +1721,11 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
     acquired = True
     
     try:
-        inputs = {"input": event.text, "chat_history": chat_history}
+        turno_cliente = construir_turno_cliente(event.text, imagenes_del_turno)
+        if imagenes_del_turno:
+            logger.info("turno_con_imagen", cantidad=len(imagenes_del_turno),
+                        con_texto=bool(event.text), conv_id=str(conv_id))
+        inputs = {"input": turno_cliente, "chat_history": chat_history}
         result = await executor.ainvoke(inputs)
         output = result["output"]
 
@@ -1698,7 +1742,7 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
                 AIMessage(content=str(output)[:500]),
                 HumanMessage(content=TOOL_LEAK_RETRY_HINT),
             ]
-            result = await executor.ainvoke({"input": event.text, "chat_history": retry_history})
+            result = await executor.ainvoke({"input": turno_cliente, "chat_history": retry_history})
             output = result["output"]
             leak = detect_internal_leak(output)
             if leak:
