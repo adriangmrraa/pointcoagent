@@ -1726,7 +1726,21 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
             logger.info("turno_con_imagen", cantidad=len(imagenes_del_turno),
                         con_texto=bool(event.text), conv_id=str(conv_id))
         inputs = {"input": turno_cliente, "chat_history": chat_history}
-        result = await executor.ainvoke(inputs)
+        try:
+            result = await executor.ainvoke(inputs)
+        except Exception as e:
+            # Si el proveedor no pudo BAJAR la foto -link vencido, host caido,
+            # formato raro- la llamada entera falla y la clienta se queda sin
+            # respuesta. Antes de la vision recibia una mala; quedarse muda seria
+            # peor. Se reintenta sin la imagen, avisando que no se pudo ver.
+            if not imagenes_del_turno:
+                raise
+            logger.warning("imagen_no_procesable_reintento_sin_foto",
+                           error=str(e)[:200], conv_id=str(conv_id))
+            await log_db("warn", "imagen_no_procesable", str(e)[:300], {"correlation_id": correlation_id})
+            turno_cliente = construir_turno_cliente(event.text, [])
+            inputs = {"input": turno_cliente, "chat_history": chat_history}
+            result = await executor.ainvoke(inputs)
         output = result["output"]
 
         # --- ANTI-FUGA DE INTERNALS (2026-08) ---
