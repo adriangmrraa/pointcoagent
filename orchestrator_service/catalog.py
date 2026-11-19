@@ -167,6 +167,148 @@ def available_variant_values(variants) -> list:
     return ordered
 
 
+# --- COMBINACIONES DE VARIANTES (2026-11) ----------------------------------
+# Caso real: la Amanda SO DANCA tiene talle M en Negro y en Bordo, pero NO en
+# Rosa te. El bot veia la lista aplanada "P, Negro, Rosa te, M, Bordo, G" y no
+# tenia forma de distinguirlo: si una clienta pedia "M en rosa" podia decir que
+# si. Prometer algo que no existe es peor que no encontrarlo.
+#
+# Tienda Nube nombra cada dimension en product["attributes"] ("Talle", "Color",
+# "Anchos", "Durezas") en el MISMO orden que variants[].values, y ese orden
+# cambia de producto a producto (la Amanda es Talle/Color, la LEDA es
+# Color/Talle). Por eso se agrupa por el nombre del atributo, nunca por su
+# posicion.
+#
+# Este texto se copia al mensaje que lee la clienta, asi que tiene que ser
+# legible en WhatsApp y no solo correcto.
+
+_MAX_COMBINACIONES = 12  # arriba de esto no se puede leer: las puntas llegan a 42
+_MAX_CARACTERES = 180    # una linea de "Variantes:" mas larga no la lee nadie
+
+
+def _nombres_de_atributos(product) -> list:
+    nombres = []
+    crudos = product.get("attributes") if isinstance(product, dict) else None
+    for a in crudos or []:
+        if isinstance(a, dict):
+            nombres.append((a.get("es") or a.get("en") or "").strip())
+        elif isinstance(a, str):
+            nombres.append(a.strip())
+        else:
+            nombres.append("")
+    return nombres
+
+
+def _valores_de_variante(variant) -> list:
+    fuera = []
+    if not isinstance(variant, dict):
+        return fuera
+    for val in variant.get("values") or []:
+        if isinstance(val, dict):
+            fuera.append((val.get("es") or val.get("en") or "").strip())
+        elif isinstance(val, str):
+            fuera.append(val.strip())
+    return fuera
+
+
+def variant_availability_text(product) -> str:
+    """Lo que el bot PUEDE prometer, en texto legible para la clienta.
+
+    Una sola dimension -> igual que siempre: "P, M, G".
+
+    Dos o mas, con pocas combinaciones -> agrupado, para que se vea que la
+    combinacion importa:
+        "Talle P: Negro, Rosa te - Talle M: Negro, Bordo - Talle G: Negro"
+
+    Demasiadas combinaciones (puntas: Talle x Anchos x Durezas) -> cada
+    dimension por separado, avisando que no todas existen:
+        "Talle: 34, 35 | Anchos: X, XX (no todas las combinaciones tienen stock)"
+    """
+    if not isinstance(product, dict):
+        return ""
+    crudas = product.get("variants")
+    if not isinstance(crudas, list):
+        return ""
+    combos = [_valores_de_variante(v) for v in crudas if variant_has_stock(v)]
+    combos = [c for c in combos if any(c)]
+    if not combos:
+        return ""
+
+    dimensiones = max(len(c) for c in combos)
+    if dimensiones < 2:
+        return ", ".join(available_variant_values(crudas))
+
+    nombres = _nombres_de_atributos(product)
+
+    def etiqueta_de(i):
+        return nombres[i] if i < len(nombres) and nombres[i] else ""
+
+    def por_dimension():
+        """Cada dimension por separado, avisando que no todas se cruzan."""
+        partes = []
+        for i in range(dimensiones):
+            vistos, valores = set(), []
+            for c in combos:
+                v = c[i] if i < len(c) else ""
+                if v and v not in vistos:
+                    vistos.add(v)
+                    valores.append(v)
+            if not valores:
+                continue
+            nombre = etiqueta_de(i)
+            partes.append((nombre + ": " if nombre else "") + ", ".join(valores))
+        if not partes:
+            return ""
+        return " | ".join(partes) + " (no todas las combinaciones tienen stock)"
+
+    if len(combos) > _MAX_COMBINACIONES:
+        return por_dimension()
+
+    # Agrupar por el talle si el producto lo tiene; si no, por la primera dimension.
+    clave = 0
+    for i in range(dimensiones):
+        if "talle" in etiqueta_de(i).lower():
+            clave = i
+            break
+
+    nombre_clave = etiqueta_de(clave)
+    grupos = {}
+    for c in combos:
+        k = c[clave] if clave < len(c) else ""
+        resto = " / ".join(v for i, v in enumerate(c) if i != clave and v)
+        grupos.setdefault(k, [])
+        if resto and resto not in grupos[k]:
+            grupos[k].append(resto)
+
+    # Si TODOS los talles traen exactamente las mismas opciones, repetirlas una
+    # por talle no agrega nada ("Talle 27: Rosa - Talle 28: Rosa - ..."). Se
+    # colapsa. No reintroduce ambiguedad: se colapsa solo cuando es cierto que
+    # cada talle tiene las mismas opciones.
+    listas = list(grupos.values())
+    if len(listas) > 1 and all(r == listas[0] for r in listas) and listas[0]:
+        talles = ", ".join(k for k in grupos if k)
+        opciones = ", ".join(listas[0])
+        if talles and nombre_clave:
+            return opciones + " | " + nombre_clave + ": " + talles
+        if talles:
+            return opciones + " | " + talles
+        return opciones
+
+    partes = []
+    for k, resto in grupos.items():
+        cabeza = (nombre_clave + " " + k).strip() if k else nombre_clave
+        if resto:
+            partes.append((cabeza + ": " if cabeza else "") + ", ".join(resto))
+        elif cabeza:
+            partes.append(cabeza)
+    agrupado = " - ".join(partes)
+    # Con 3 dimensiones el agrupado se vuelve ilegible (las Medias de Paton
+    # daban 334 caracteres). Mejor decir cada dimension y avisar del cruce.
+    if len(agrupado) > _MAX_CARACTERES:
+        return por_dimension() or agrupado
+    return agrupado
+
+
 # --- BUSQUEDA AMPLIADA (2026-08) -------------------------------------------
 # El buscador de Tienda Nube exige que TODOS los terminos aparezcan en el NOMBRE
 # del producto. Caso real 2026-07-23: una clienta pidio "elasticos Grishko", el

@@ -99,6 +99,50 @@ Terminos que NO son ambiguos y van directo a su categoria: "punteras" o "puntera
 
 ---
 
+## Combinaciones de Variantes (NUEVO 2026-11)
+
+El bot NO debe prometer una combinacion de talle y color que no existe. Prometer
+algo que no hay es peor que no encontrarlo: la clienta compra o viaja y despues
+no esta.
+
+**Caso que lo origino (2026-11-19):** la Amanda SO DANCA tiene talle M con stock
+en Negro y en Bordo, pero NO en Rosa te. El campo `variants` que veia el modelo
+era la lista APLANADA `"P, Negro, Rosa te, M, Bordo, G"`, sin forma de saber que
+combinaciones existen. Medido con el modelo real, el bot afirmaba la combinacion
+inexistente en **11 de 24 corridas**.
+
+- **Donde se arregla:** `variant_availability_text()` en `catalog.py`, que
+  `simplify_product()` usa en lugar de `available_variant_values()`.
+- **Dato clave:** Tienda Nube nombra cada dimension en `product["attributes"]`
+  (`Talle`, `Color`, `Anchos`, `Durezas`) en el MISMO orden que
+  `variants[].values`, y **ese orden cambia de producto a producto** (la Amanda
+  es Talle/Color, la LEDA es Color/Talle). Siempre agrupar por el NOMBRE del
+  atributo, nunca por su posicion.
+- **Formatos de salida** (este texto se copia al mensaje que lee la clienta, asi
+  que tiene que ser legible en WhatsApp, no solo correcto):
+  - una sola dimension -> igual que siempre: `"P, M, G"` (33 de 66 productos: sin cambio)
+  - todos los talles con las mismas opciones -> colapsado: `"Negro | Talle: P, M"`
+  - agrupado: `"Talle P: Negro, Rosa te - Talle M: Negro, Bordo - Talle G: Negro"`
+  - mas de 12 combinaciones o mas de 180 caracteres -> cada dimension por
+    separado + aviso: `"Talle: 34, 35 | Anchos: C, D (no todas las combinaciones tienen stock)"`
+    (las puntas llegan a 42 combinaciones; van a fitting igual)
+- **Regla del prompt** (seccion GUIA DE USO DE DATOS, NO los docstrings de las
+  tools): leer `variants` como combinaciones, nunca afirmar una que no figura, y
+  contestar con palabras si el talle/color pedido esta o no. Pegar la ficha sin
+  contestar no cuenta.
+- **Medicion:** `python evals/eval_combinaciones.py`. Mide 3 brazos (dato viejo,
+  dato nuevo, dato+prompt) contra el modelo real y clasifica en PROMETE (el bug),
+  CONTESTA y ESQUIVA. Resultado al subirlo: **24/24 CONTESTA, 0 PROMETE**, contra
+  11 PROMETE de produccion. Los 3 casos de control (combinaciones que SI existen)
+  dieron 4/4 en los tres brazos: no hay regresion al negar cosas que hay.
+
+Otros productos donde el mismo bug estaba latente y nadie lo habia visto:
+Pollerin SO DANCA (Lila solo en P), CONSTANZA (Nude no esta en M), LEDA (M solo
+en Bordo, G solo en Negro: cero cruce), Media punta AF23 (Blanco y Beige solo en
+talle 39).
+
+---
+
 ## Veracidad y Gate de Catalogo (UNIFICADO)
 
 Las 3 barreras anti-alucinacion originales (Regla de Veracidad + Gate Absoluto + Parche Critico) estan consolidadas en una unica seccion del prompt:
@@ -171,6 +215,25 @@ Si una tool falla por error tecnico (timeout, error 500):
 ## Observabilidad
 - Usa `system_events` para auditar fallos en el bridge MCP o errores de SMTP.
 - Revisa `http_request_completed` en los logs para monitorear latencia del agente.
+
+### Herramientas de revision (`evals/`, todas de SOLO LECTURA)
+
+Ninguna escribe en la base, manda mensajes ni deploya. Los informes se guardan
+**fuera del repo** (en `Documentos/pointcoagent-informes`) porque contienen
+nombres y telefonos de clientas.
+
+| Script | Para que | Cuando |
+| :--- | :--- | :--- |
+| `monitor_respuestas.py` | marca respuestas sospechosas de las ultimas horas: "no tenemos" sobre algo que SI hay, turnos con imagen, afirmaciones de calce | despues de cada deploy |
+| `informe_semanal.py` | exporta las conversaciones de la semana como charla legible + los casos para mirar | los viernes |
+| `vigilar_catalogo.py` | compara el catalogo contra la corrida anterior: productos NUEVOS (y si el bot los encuentra), agotados, repuestos, renombrados, cambios de precio | periodico; la dueña carga productos sin avisar |
+| `auditoria_catalogo.py` | recorre el catalogo entero y marca que productos el bot NO encontraria como los pide una clienta | al cambiar la busqueda |
+| `eval_combinaciones.py` | mide si el bot promete combinaciones talle/color que no existen | al tocar variantes o el prompt |
+
+**Por que existe `vigilar_catalogo.py`:** se cargo "LEDA SO DANCA" sin que nadie
+avisara, una clienta pidio "la malla leda", el bot dijo que no la tenia, y lo
+descubrimos leyendo conversaciones una semana despues. La primera corrida solo
+guarda la foto del catalogo; de la segunda en adelante dice que cambio.
 
 ---
 

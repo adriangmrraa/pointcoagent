@@ -8,7 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "orchestrator_service"))
 
-from catalog import variant_has_stock, is_product_available, available_variant_values, pick_category_id
+from catalog import (variant_has_stock, is_product_available, available_variant_values,
+                     pick_category_id, variant_availability_text)
 
 
 def v(stock, values=None):
@@ -455,3 +456,107 @@ def test_el_orden_de_la_union_no_le_gana_al_puntaje():
     union[1]["id"] += 100
     top = [p["name"] for p in rank_widened_results("Elásticos Grishko", union)]
     assert top == ["Cintas Elastizadas Grishko"], top
+
+
+# --- variant_availability_text: las COMBINACIONES de variantes -------------
+# Caso real 2026-11-19: la Amanda tiene talle M en Negro y Bordo, pero NO en
+# Rosa té. El bot veía "P, Negro, Rosa té, M, Bordo, G" y podía prometer
+# un M en rosa que no existe.
+
+def _prod(attrs, combos):
+    """combos: lista de (stock, [valores...]) en el orden de attrs."""
+    return {
+        "attributes": [{"es": a} for a in attrs],
+        "variants": [{"stock": s, "values": [{"es": x} for x in vals]}
+                     for s, vals in combos],
+    }
+
+
+AMANDA_VARIANTES = _prod(["Talle", "Color"], [
+    (1, ["P", "Negro"]), (0, ["P", "Bordo"]), (1, ["P", "Rosa té"]),
+    (2, ["M", "Negro"]), (2, ["M", "Bordo"]), (0, ["M", "Rosa té"]),
+    (1, ["G", "Negro"]), (0, ["G", "Bordo"]), (0, ["G", "Rosa té"]),
+])
+
+
+def test_amanda_agrupa_talle_con_sus_colores_reales():
+    assert variant_availability_text(AMANDA_VARIANTES) == (
+        "Talle P: Negro, Rosa té - Talle M: Negro, Bordo - Talle G: Negro")
+
+
+def test_amanda_no_ofrece_la_combinacion_agotada():
+    # Lo único que importa de verdad: M y "Rosa té" no pueden quedar juntos.
+    texto = variant_availability_text(AMANDA_VARIANTES)
+    tramo_m = texto.split("Talle M:")[1].split(" - ")[0]
+    assert "Rosa té" not in tramo_m, tramo_m
+
+
+def test_una_sola_dimension_no_cambia_nada():
+    # Regresión: los productos de una dimensión tienen que seguir igual que antes.
+    p = _prod(["Talle"], [(1, ["P"]), (0, ["M"]), (3, ["G"])])
+    assert variant_availability_text(p) == "P, G"
+    assert variant_availability_text(p) == ", ".join(
+        available_variant_values(p["variants"]))
+
+
+def test_agrupa_por_talle_aunque_venga_segundo_el_orden_de_atributos():
+    # La LEDA es Color/Talle y la Amanda Talle/Color: hay que mirar el nombre.
+    p = _prod(["Color", "Talle"], [(1, ["Bordó", "M"]), (1, ["Negro", "G"])])
+    assert variant_availability_text(p) == "Talle M: Bordó - Talle G: Negro"
+
+
+def test_colapsa_cuando_todos_los_talles_traen_lo_mismo():
+    p = _prod(["Talle", "Color"], [
+        (1, ["P", "Negro"]), (1, ["M", "Negro"]), (1, ["G", "Negro"])])
+    assert variant_availability_text(p) == "Negro | Talle: P, M, G"
+
+
+def test_no_colapsa_si_un_talle_tiene_menos_opciones():
+    p = _prod(["Talle", "Color"], [
+        (1, ["P", "Negro"]), (1, ["P", "Lila"]), (1, ["M", "Negro"])])
+    assert variant_availability_text(p) == "Talle P: Negro, Lila - Talle M: Negro"
+
+
+def test_demasiadas_combinaciones_avisa_que_no_todas_existen():
+    # Las puntas llegan a 42 combinaciones: listarlas es ilegible.
+    combos = [(1, [str(t), a, d]) for t in range(30, 40) for a in ("C", "D") for d in ("N",)]
+    p = _prod(["Talle", "Anchos", "Durezas"], combos)
+    texto = variant_availability_text(p)
+    assert texto.endswith("(no todas las combinaciones tienen stock)")
+    assert "Talle: 30, 31" in texto and "Anchos: C, D" in texto
+
+
+def test_texto_agrupado_muy_largo_cae_al_formato_por_dimension():
+    # Las Medias de Patón reales: 10 combinaciones de valores largos, y el talle
+    # 3 en otro color, así que no se puede colapsar. Agrupado daba 334 chars.
+    combos = [(1, [str(t), "Beige Claro" if t == 3 else "Beige Mediano", u])
+              for t in range(0, 5) for u in ("(1 unidad)", "(6 unidades)")]
+    p = _prod(["Talle", "Color", "Cantidad"], combos)
+    texto = variant_availability_text(p)
+    assert len(texto) < 200, "%d chars: %s" % (len(texto), texto)
+    assert "no todas las combinaciones" in texto
+    # y los dos colores siguen estando, no se perdio informacion
+    assert "Beige Claro" in texto and "Beige Mediano" in texto
+
+
+def test_sin_stock_no_dice_nada():
+    p = _prod(["Talle", "Color"], [(0, ["P", "Negro"]), (0, ["M", "Negro"])])
+    assert variant_availability_text(p) == ""
+
+
+def test_sin_atributos_igual_agrupa():
+    p = {"variants": [{"stock": 1, "values": [{"es": "M"}, {"es": "Negro"}]},
+                      {"stock": 1, "values": [{"es": "M"}, {"es": "Bordo"}]}]}
+    assert variant_availability_text(p) == "M: Negro, Bordo"
+
+
+def test_entrada_rota_no_explota():
+    for basura in (None, "texto", 42, {}, {"variants": None}, {"variants": "x"},
+                   {"variants": [None, 7]}, {"variants": [{"values": None}]}):
+        assert variant_availability_text(basura) == ""
+
+
+def test_stock_infinito_cuenta_como_disponible():
+    # stock None = sin control de stock en Tienda Nube: se puede ofrecer.
+    p = _prod(["Talle", "Color"], [(None, ["P", "Negro"]), (0, ["M", "Negro"])])
+    assert variant_availability_text(p) == "Talle P: Negro"

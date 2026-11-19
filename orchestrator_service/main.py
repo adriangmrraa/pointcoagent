@@ -56,6 +56,7 @@ from db import db
 from catalog import (
     is_product_available,
     available_variant_values,
+    variant_availability_text,
     canonical_category_name,
     pick_category_id,
     search_term_alias,
@@ -617,16 +618,17 @@ def simplify_product(p):
     
     price = "0"
     promo_price = None
-    variant_details = []
+    variant_details = ""
     
     if variants:
         v0 = variants[0] if isinstance(variants[0], dict) else {}
         price = v0.get("price", "0")
         promo_price = v0.get("promotional_price", None)
         
-        # Summarize variants (e.g., "Color: Rojo, Azul")
-        # Solo variantes CON stock: el bot no debe ofrecer un talle/color agotado.
-        variant_details = available_variant_values(variants)
+        # Solo variantes CON stock, y agrupadas: el bot no debe ofrecer un
+        # talle/color agotado NI una combinacion que no existe (ver
+        # variant_availability_text en catalog.py).
+        variant_details = variant_availability_text(p)
 
     # Extract first image URL
     image_url = None
@@ -661,7 +663,7 @@ def simplify_product(p):
         "price": price,
         "promotional_price": promo_price,
         "description": clean_desc, 
-        "variants": ", ".join(variant_details), 
+        "variants": variant_details,
         "url": p.get("canonical_url"),
         "imageUrl": image_url
     }
@@ -1339,7 +1341,11 @@ Los siguientes términos son AMBIGUOS porque pueden referirse a más de una cate
 
 * Tool `name` -> Nombre del producto.
 * Tool `price` -> "Precio: $" + precio. Priorizá `promotional_price`.
-* Tool `variants` -> Variantes. Copia la lista.
+* Tool `variants` -> Variantes. Copia la lista TAL CUAL.
+  **LEELA COMO COMBINACIONES, NO COMO DOS LISTAS SUELTAS.** "Talle P: Negro, Rosa te - Talle M: Negro, Bordo" quiere decir que el talle M existe SOLO en Negro y en Bordo: un M en Rosa te NO existe.
+  Si la clienta pide una combinacion que NO figura en esa lista: nunca digas que si. Decile que ese color no esta en ese talle en este momento, y ofrecele en el mismo mensaje lo que SI hay. Ejemplo: "En M no me queda rosa te en este momento, pero lo tengo en negro y en bordo. Y en rosa te me queda el talle P". Eso no es derivar: seguis vendiendo.
+  Si la clienta nombro un talle o un color puntual, tu respuesta TIENE que decir con palabras si eso esta o no esta. Pegar la ficha del producto y nada mas NO es contestarle.
+  Si la lista dice "(no todas las combinaciones tienen stock)", NO afirmes una combinacion puntual: nombra lo que hay por separado y cerra como corresponda (fitting si son puntas).
 * Tool `description` -> Descripción. FIDEDIGNA (TÉCNICA) PERO MUY RESUMIDA (Max 2 renglones) para que entre en un solo mensaje.
 * Tool `url` -> Link al final.
 * Tool `imageUrl` -> Campo `imageUrl`.
