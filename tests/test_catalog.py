@@ -403,3 +403,55 @@ def test_el_sinonimo_no_se_traga_otras_consultas():
                    "bolsos", "endurecedor", "bolsa de red", ""]:
         assert search_term_alias(pedido) is None, pedido
     assert search_term_alias(None) is None
+
+
+# --- Orden de la union por selectividad (caso Amanda, 2026-11-19) ----------
+
+LEOTARDOS_REALES = [
+    "Leotardo para danza ELLA Grishko",
+    "Leotardo para danza EFFIE Grishko",
+    "Leotardo para danza SIA Grishko",
+    "Leotardo para danza SIBA Grishko",
+    "Maillot Heloisa So Danca | Leotardo para Danza con Encaje",
+    "Lucila SO DANCA | Leotardo con tirantes finos y encaje en espalda",
+    "Laila SO DANCA | Leotardo con escote de tul y accesorios elaborados",
+]
+AMANDA = "Amanda SO DANCA | Malla con encaje superpuesto en el busto"
+
+
+def test_el_producto_pedido_por_nombre_no_queda_afuera_del_corte():
+    """Caso real: "el leotardo Amanda en talle M lo tenes?"
+
+    El producto se llama "Amanda SO DANCA | Malla...", sin la palabra
+    "leotardo", asi que la busqueda exacta da 0. En la ampliada, "leotardo"
+    trae 7 productos y "amanda" trae 1: con la union en el orden de la
+    consulta la Amanda quedaba 8va y el corte de 6 la dejaba afuera. El bot
+    contesto "no tenemos el leotardo Amanda" con 2 unidades en M Negro y 2 en
+    M Bordo, y ofrecio un Grishko de $86.000 en vez del de $73.000.
+
+    La union se ordena por selectividad: primero los resultados del termino que
+    matcheo MENOS productos, que es el que identifica lo que pidieron.
+    """
+    por_leotardo = _prods(LEOTARDOS_REALES)          # 7 productos, generico
+    por_amanda = _prods([AMANDA])                     # 1 producto, especifico
+    for p in por_amanda:
+        p["id"] += 100                                # ids distintos
+
+    # Como venia: el generico primero.
+    union_vieja = por_leotardo + por_amanda
+    top_viejo = [p["name"] for p in rank_widened_results("leotardo Amanda", union_vieja)]
+    assert AMANDA not in top_viejo, "este test ya no reproduce el bug original"
+
+    # Ordenado por selectividad: el especifico primero.
+    union_nueva = por_amanda + por_leotardo
+    top_nuevo = [p["name"] for p in rank_widened_results("leotardo Amanda", union_nueva)]
+    assert top_nuevo[0] == AMANDA, f"la Amanda tiene que quedar primera, quedo: {top_nuevo[:2]}"
+
+
+def test_el_orden_de_la_union_no_le_gana_al_puntaje():
+    # La selectividad solo desempata. Un producto que matchea MAS terminos
+    # sigue yendo primero, aunque venga de la lista mas larga.
+    union = _prods(["Cintas Elastizadas Grishko"]) + _prods(["Elásticos Bolt Bunheads Capezio"])
+    union[1]["id"] += 100
+    top = [p["name"] for p in rank_widened_results("Elásticos Grishko", union)]
+    assert top == ["Cintas Elastizadas Grishko"], top

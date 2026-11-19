@@ -793,10 +793,16 @@ async def buscar_ampliado(q: str):
         call_tiendanube_api("/products", {"q": t, "per_page": 30}) for t in terminos
     ], return_exceptions=True)
 
+    # El termino que matchea MENOS productos es el que identifica lo que pidieron;
+    # el generico matchea de todo. Caso real 2026-11-19: "leotardo Amanda" ->
+    # "leotardo" trae 7 productos y "amanda" 1, y con el orden de la consulta la
+    # Amanda quedaba 8va: el corte de 6 la dejaba afuera y el bot contestaba que
+    # no la tenia, con 2 unidades en M Negro y 2 en M Bordo.
+    utiles = [r for r in respuestas if isinstance(r, list)]
+    utiles.sort(key=len)
+
     vistos, union = set(), []
-    for parcial in respuestas:
-        if not isinstance(parcial, list):
-            continue  # error, timeout o excepcion: se ignora ese termino
+    for parcial in utiles:
         for prod in parcial:
             pid = prod.get("id")
             if pid is not None and pid not in vistos:
