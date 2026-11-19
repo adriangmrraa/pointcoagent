@@ -58,8 +58,18 @@ El agente tiene una personalidad estricta definida en `sys_template`:
 - `search_by_category`: Busqueda filtrada por categoria.
 - `search_by_store_category`: Lista una CATEGORIA REAL de Tienda Nube por nombre EXACTO. **Obligatoria solo para `"Bolsos"`** (trae bolsos Y mochilas juntas; las mochilas no contienen "bolso" en el nombre).
   - **PENDIENTE, no instruido en el prompt:** los accesorios para el dedo (categoria `"Accesorios para el pie"`: Spacemakers, Jelly Toes, Pinky Pads, Super Spacers) y las `"Punteras"` tambien se resolverian mejor por categoria, porque los primeros estan nombrados en ingles y la busqueda de texto no los encuentra. **Caso real 2026-10-13:** una clienta pidio "dedales" y el bot contesto "no tenemos separadores de dedos" teniendo 6 productos con stock, uno con esa frase literal en su descripcion.
-  - **Por que no esta instruido todavia:** se probo (commits d27a8fb y 19385f0) y se revirtio. Medido con el modelo real, la instruccion enfatica arrastra todo lo que suena a accesorio de puntas: el bot dejaba de encontrar el Endurecedor SHOE GLUE (4/4) y la Bolsa de Malla MESH BAGS (4/4), que hoy SI encuentra. Dos intentos de acotarla arreglaron un caso y rompieron otro. **Requiere un set de evals de ruteo antes de reintentarlo.**
-  - El codigo que lo soporta YA esta: `canonical_category_name()` y el `pick_category_id()` por solapamiento de palabras en `catalog.py`. Falta solo la instruccion del prompt.
+  - **RESUELTO EN CODIGO (2026-11).** `buscar_por_categoria_equivalente()` lo arregla sin tocar el prompt: cuando la busqueda de texto devuelve CERO, resuelve la consulta a una categoria real. Verificado contra el catalogo: `"dedales"`, `"separadores de dedos"` y `"separadores"` dan 0 por texto y el rescate devuelve los **7 productos** de `"Accesorios para el pie"`. `"Punteras para dedos"` sigue cayendo en `Punteras`, no se contamina. Probado de punta a punta: la clienta termina viendo los productos.
+  - **NO instruir el ruteo desde el prompt. Tercer intento medido y revertido (2026-11).** Esta vez con el banco (`evals/banco_ruteo.py`), 10 corridas por caso. Agregar la palabra `"dedales"` a UNA linea del diccionario:
+
+    | caso | antes | despues |
+    | :--- | :--- | :--- |
+    | "tenes dedales?" | 0/10 | 2/10 |
+    | "tenes spacemakers?" | 0/10 | 1/10 |
+    | "tenes endurecedor?" | 0/10 | 10/10 |
+    | **"tenes protectores de punta?"** | **10/10** | **4/10** |
+
+    Una palabra rompe la desambiguacion legitima 6 de 10 veces, y "protectores de punta" sin aclarar muestra la familia equivocada. **Antes de reintentarlo, correr `evals/banco_ruteo.py` y exigir que no baje ningun caso de control.**
+  - **Lo que queda:** `"dedales"` y `"spacemakers"` disparan la pregunta de desambiguacion aunque no son ambiguos. Cuesta UN turno, no la venta: la clienta aclara y el rescate le muestra los 7 productos. Se decidio dejarlo asi.
 - `browse_general_storefront`: Ultimo recurso (catalogo general) y para consultas vagas.
 - `cupones_list`: Promociones vigentes.
 - `orders`: Consulta de pedido (ID sin #).
@@ -96,6 +106,70 @@ Los siguientes terminos son AMBIGUOS y disparan una pregunta de clarificacion an
 - "almohadillas" (sola, sin "para puntas" ni "para dedos")
 
 Terminos que NO son ambiguos y van directo a su categoria: "punteras" o "punteras de gel" -> PUNTERAS; "separadores de dedos" o "protectores de dedos" -> SEPARADORES DE DEDOS; "toppers de puntas" -> PROTECTORES DE PUNTAS.
+
+---
+
+## Consejos de Calce y Talles Inventados (NUEVO 2026-11)
+
+El bot NO sabe como le va a calzar una zapatilla: depende del pie. Cuando opina
+igual -"las hormas son chicas, pedi un numero mas que el de calle"- la clienta
+compra el talle equivocado y termina en un cambio o en un viaje al local al
+vacio. Para puntas ademas contradice todo el protocolo de fitting, que existe
+porque hay que tomarle el pie.
+
+- **Prohibicion en el prompt:** seccion de veracidad, junto a "Prohibido
+  inventar". Dice que los talles que existen son EXACTAMENTE los del campo
+  `variants`, y que si piden uno que no esta hay que decir que talles maneja ese
+  producto y PARAR AHI.
+- **El prompt NO alcanza, y esta medido:** ante un pedido directo ("calzo 38 de
+  calle, que talle de puntas pido?") el modelo le hace caso a la clienta **8 de
+  8 veces**. Con el aviso explicito del guardia lo corrige **8 de 8**.
+- **Guardia en codigo:** `detect_fit_advice()` en `guardrails.py`, cableado en
+  `/chat` con el MISMO patron que la fuga de JSON: detecta, reintenta una vez con
+  `FIT_RETRY_HINT`, y si insiste corta con `FIT_FALLBACK_TEXT` (que ofrece el
+  fitting). Eventos: `consejo_de_calce` y `consejo_de_calce_tras_reintento`.
+- **Mira SOLO el texto que lee la clienta,** nunca el JSON crudo: si se le pasa
+  el string completo lee tambien las descripciones del catalogo, y una ficha que
+  diga "horma angosta" lo dispara sin que el bot haya opinado nada. Para eso esta
+  `_parse_output_para_guardia()`. Medido: 0 de los 66 productos visibles tiene
+  una descripcion que lo dispararia.
+- **Resultado** (`evals/banco_talles.py`, 8 casos x 4 corridas):
+
+  | | INVENTA (el bug) | CONTESTA | ESQUIVA | RED |
+  | :--- | :--- | :--- | :--- | :--- |
+  | antes | 9 | 22 | 1 | 0 |
+  | ahora | **0** | 23 | 9 | 0 |
+
+  Costo: el guardia actuo 7 veces en 32 turnos (una llamada extra cada una). La
+  red (`FIT_FALLBACK_TEXT`) nunca tuvo que salir: el reintento siempre alcanzo.
+  Las 9 "esquiva" son el bot listando los talles reales sin decir explicitamente
+  "el 38 no esta": dato correcto, menos enfatico. Se acepto el cambio porque
+  prometer un calce que no se sabe cuesta mas que una respuesta menos enfatica.
+- **Hueco cerrado en la segunda vuelta:** el guardia exigia la palabra "talle"
+  despues de "equivale a", y el modelo escribia *"En talle 38 (equivale a 5 1/2 o
+  6 segun numeracion)"* -una conversion de talles con el numero suelto- que se le
+  escapaba. Lo encontro el banco, no un test de unidad: el banco compara contra
+  un detector mas amplio justamente para ver si al de produccion se le escapa algo.
+
+---
+
+## Productos sin Opciones de Talle ni Color (NUEVO 2026-11)
+
+**18 de los 66 productos visibles** tienen una sola variante sin valores:
+punteras, gel para dedos, endurecedor, cintas elastizadas, cueritos. Para esos,
+`simplify_product()` manda `variants = SIN_VARIANTES` ("Unica presentacion").
+
+**No es cosmetico.** Medido con el modelo real, 3 corridas cada uno:
+
+| que se le manda | resultado |
+| :--- | :--- |
+| `"variants": ""` (como estaba) | 3/3 mal: escribe la etiqueta y le mete la descripcion adentro ("Variantes: Paquete combinado de Spacers para tratar juanetes...") |
+| sin la clave `variants` | 3/3 mal: **inventa** variantes leyendo la descripcion ("Variantes: Gel y tela", "Variantes: 2 por paquete") |
+| una regla en el prompt para omitir la etiqueta | 3/3 mal, la ignora |
+| **un valor explicito** | **0/3 mal** |
+
+Dice "presentacion" y no "talle unico" porque 18 de esos productos son
+pegamento, cintas y cueritos, que no tienen talle.
 
 ---
 
@@ -229,6 +303,18 @@ nombres y telefonos de clientas.
 | `vigilar_catalogo.py` | compara el catalogo contra la corrida anterior: productos NUEVOS (y si el bot los encuentra), agotados, repuestos, renombrados, cambios de precio | periodico; la dueña carga productos sin avisar |
 | `auditoria_catalogo.py` | recorre el catalogo entero y marca que productos el bot NO encontraria como los pide una clienta | al cambiar la busqueda |
 | `eval_combinaciones.py` | mide si el bot promete combinaciones talle/color que no existen | al tocar variantes o el prompt |
+| `banco_ruteo.py` | 23 casos: a que tool va cada consulta, incluidas las regresiones historicas y las desambiguaciones que SI corresponden | **obligatorio antes de tocar el prompt** |
+| `banco_talles.py` | si inventa talles o consejos de calce; reproduce el reintento del guardia | al tocar talles, variantes o el prompt |
+
+Los tres ultimos comparan el prompt de **HEAD** (lo que esta corriendo) contra el
+del working tree, con el prompt y las herramientas leidos del `main.py` real por
+AST (`evals/arnes.py`). Si alguien cambia un docstring de una tool, los bancos lo
+miden al toque; un banco con herramientas copiadas a mano mide otra cosa y da
+falsa tranquilidad.
+
+**Ojo con la cantidad de corridas.** A temperatura 0 el modelo NO es
+determinista: con 3 corridas se confunde ruido con mejora. Los numeros que
+decidieron revertir el ruteo salieron de 10 corridas por caso.
 
 **Por que existe `vigilar_catalogo.py`:** se cargo "LEDA SO DANCA" sin que nadie
 avisara, una clienta pidio "la malla leda", el bot dijo que no la tenia, y lo
