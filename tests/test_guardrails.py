@@ -189,3 +189,79 @@ def test_el_fallback_de_fuga_sobrevive_al_guardrail_de_urls():
     assert len(kept) == 1
     assert kept[0]["text"] == TOOL_LEAK_FALLBACK_TEXT
     assert blocked == []
+
+
+# --- detect_fit_advice: consejos de calce inventados ------------------------
+# El bot no sabe cómo le va a calzar una zapatilla: depende del pie. Si opina
+# igual, la clienta compra el talle equivocado y termina en un cambio o en un
+# viaje al local al vacío; para puntas además contradice el fitting. La
+# prohibición está en el prompt, pero medido con el modelo real no alcanza: ante
+# un pedido directo le hace caso a la clienta 8 de 8 veces.
+
+from guardrails import detect_fit_advice  # noqa: E402
+
+
+def bot(texto):
+    return {"messages": [{"text": texto, "imageUrl": None}]}
+
+
+CONSEJOS = [
+    "Mirá, para las zapatillas de punta las hormas suelen ser chicas, por eso te conviene pedir un número más.",
+    # Conversión de talles con el número suelto, sin la palabra "talle" detrás.
+    # Caso real medido: se escapaba del guardia y el banco sí lo marcaba.
+    "En talle 38 (equivale a 5 1/2 o 6 según numeración) hay algunas combinaciones.",
+    "El 38 equivale a 5 1/2 en estas puntas.",
+    "Si calzás 38, sería un talle 5 en Grishko.",
+    "Tené en cuenta que las hormas son chicas y se recomienda elegir un número más del calce de calle.",
+    "Si calzás 38 de calle, en puntas equivale al talle 5.",
+    "Te va a quedar perfecta esa media punta.",
+    "Las Grishko suelen calzar más chico que las Só Danca.",
+    "Para un 38 de calle generalmente se recomienda pedir un talle más.",
+    "Esa horma es angosta, te quedaría justa.",
+]
+
+LEGITIMOS = [
+    "Las Grishko 3007 PRO vienen en talles 3 1/2 al 7 1/2. Decime cuál usás?",
+    "Tenemos talle 38 disponible en rosa. Te paso el link.",
+    "En M no me queda rosa té, pero lo tengo en negro y en bordo.",
+    "Qué talle necesitás? Así te confirmo si lo tengo.",
+    "Te derivamos con una asesora (FITTER), que está capacitada para que encuentres "
+    "la mejor punta que se adecue a TU PIE, en breve se contacta con vos.",
+    "Precio: $259000 Variantes: Talle: 3 1/2, 4, 4 1/2 | Anchos: XXX",
+    "El costo y tiempo de envío se calculan al final de la compra según tu ubicación.",
+    "Mirá estas opciones de leotardos que tenemos!",
+    "Los talles disponibles son 4, 5 y 6.",
+    "En talle 38 tenemos en ancho C y D.",
+    "Ese producto no lo manejamos por acá, pero te puedo mostrar media puntas si querés!",
+]
+
+
+def test_detecta_cada_consejo_de_calce():
+    for texto in CONSEJOS:
+        assert detect_fit_advice(bot(texto)), texto
+
+
+def test_no_dispara_con_mensajes_legitimos():
+    for texto in LEGITIMOS:
+        assert detect_fit_advice(bot(texto)) is None, texto
+
+
+def test_solo_mira_el_texto_que_lee_la_clienta():
+    # Si la DESCRIPCIÓN del catálogo habla de horma, eso lo escribió la tienda.
+    # Medido: 0 de los 66 productos visibles tiene una descripción así, pero el
+    # guardia no debe mirar ahí igual.
+    salida = {"messages": [{"text": "Mirá, tenemos estas opciones. Precio: $259000"}],
+              "description": "Horma angosta, suele calzar más chico"}
+    assert detect_fit_advice(salida) is None
+
+
+def test_entrada_rota_no_explota():
+    for basura in (None, "", {}, {"messages": None}, {"messages": [None]},
+                   {"messages": [{"text": None}]}, [], 42):
+        detect_fit_advice(basura)      # no debe tirar excepción
+
+
+def test_detecta_en_el_segundo_mensaje_de_la_secuencia():
+    salida = {"messages": [{"text": "Hola! Mirá lo que encontré."},
+                           {"text": "Para puntas te conviene pedir un número más."}]}
+    assert detect_fit_advice(salida)

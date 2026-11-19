@@ -57,6 +57,7 @@ from catalog import (
     is_product_available,
     available_variant_values,
     variant_availability_text,
+    SIN_VARIANTES,
     canonical_category_name,
     pick_category_id,
     search_term_alias,
@@ -67,14 +68,46 @@ from guardrails import (
     collect_urls,
     filter_outbound_messages,
     detect_internal_leak,
+    detect_fit_advice,
     FALLBACK_TEXT,
     TOOL_LEAK_FALLBACK_TEXT,
     TOOL_LEAK_RETRY_HINT,
+    FIT_RETRY_HINT,
+    FIT_FALLBACK_TEXT,
 )
 from llm_provider import resolve_llm_provider
 from turn_state import clear_once, get_once, mark_once, reset_turn
 
 HANDOFF_ONCE = "handoff"
+
+
+def _parse_output_para_guardia(output):
+    """Normaliza el output del agente a {"messages": [...]} para los guardias.
+
+    Importa que sea un dict y no el string crudo: si se le pasa el JSON como
+    texto, el guardia lee TAMBIEN las descripciones de los productos, que las
+    escribio la tienda. Una ficha que dice "horma angosta" dispararia el
+    guardia aunque el bot no haya opinado nada.
+    """
+    if isinstance(output, dict):
+        return output
+    if hasattr(output, "messages"):          # OrchestratorResponse de Pydantic
+        try:
+            return {"messages": [
+                {"text": getattr(m, "text", "") or ""} for m in output.messages]}
+        except Exception:
+            pass
+    if isinstance(output, str):
+        bruto = output.strip()
+        if bruto.startswith("{"):
+            try:
+                d = json.loads(bruto)
+                if isinstance(d, dict):
+                    return d
+            except Exception:
+                pass
+        return {"messages": [{"text": output}]}
+    return {"messages": [{"text": str(output)}]}
 
 # Configuration & Environment
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -657,16 +690,27 @@ def simplify_product(p):
     if len(clean_desc) > 300:
         clean_desc = clean_desc[:297] + "..."
 
-    return {
+    salida = {
         "id": p.get("id"),
         "name": p.get("name", {}).get("es", "Sin nombre"),
         "price": price,
         "promotional_price": promo_price,
-        "description": clean_desc, 
-        "variants": variant_details,
+        "description": clean_desc,
         "url": p.get("canonical_url"),
         "imageUrl": image_url
     }
+    # 18 de los 66 productos visibles no tienen opciones: una sola variante sin
+    # valores (punteras, gel para dedos, endurecedor, cintas, cueritos).
+    #
+    # Con "variants": "" el modelo escribe la etiqueta igual -el prompt dice que
+    # la etiqueta SI va- y le mete la descripcion adentro: "Precio: $29000
+    # Variantes: Paquete combinado de Spacers para tratar juanetes...". Y si la
+    # clave NO viene, es peor: inventa las variantes leyendo la descripcion
+    # ("Variantes: Gel y tela", "Variantes: 2 por paquete"). Medido con el
+    # modelo real: clave vacia 3/3 mal, sin clave 3/3 mal, valor explicito 0/3.
+    # Una regla en el prompt para que omita la etiqueta tampoco alcanzo (3/3 mal).
+    salida["variants"] = variant_details or SIN_VARIANTES
+    return salida
 
 IMAGENES_POR_TURNO = 2  # mas de 2 fotos en un turno no aportan y encarecen
 
@@ -1218,6 +1262,7 @@ Los siguientes términos son AMBIGUOS porque pueden referirse a más de una cate
 ## VERACIDAD Y GATE DE CATÁLOGO (CRÍTICO E INNEGOCIABLE)
 
 * Prohibido inventar: precios, stock, variantes, links, imágenes, estados de pedidos, cupones. Link e imageUrl solo pueden ser valores exactos devueltos por tools. Nunca construyas URLs ni "arregles" dominios/rutas. Prohibido "completar" productos: solo mostrar productos existentes en outputs de tools.
+* **PROHIBIDO OPINAR SOBRE CALCE, HORMA O EQUIVALENCIAS DE TALLE.** No digas que la horma es chica o grande, ni "pedí un número más", ni "equivale a tal talle de calle", ni cómo le va a quedar. No lo sabés: depende del pie de cada una, y una compra con el talle equivocado termina en un cambio o en un viaje al local al vacío. Los talles que existen son EXACTAMENTE los del campo `variants` y nada más: si pide un talle que no está en esa lista, decí qué talles maneja ese producto y PARÁ AHÍ. Si insiste o necesita que alguien la asesore, son puntas -> fitting (`derivhumano`); no son puntas -> derivá igual con `derivhumano`.
 * **VALIDATION FIRST:** Antes de buscar, identificá si el usuario pide una categoría del Diccionario de Sinónimos.
 * **RELEVANCIA ESTRICTA:** Si el usuario pide una categoría específica (ej: "Medias"), está terminantemente PROHIBIDO mostrar productos de otra categoría. Solo mostrá lo que se pidió tras el mapeo.
 * **Consultas vagas/banales:** Si el usuario pregunta de forma general ("¿Qué tienen?", "Mostrame algo lindo"), no repreguntes. Ejecutá `browse_general_storefront` inmediatamente y mostrá 3 opciones reales del catálogo.
@@ -1776,6 +1821,33 @@ async def chat_endpoint(request: Request, event: InboundChatEvent, x_internal_to
                 await log_db("error", "internal_tool_call_leaked", f"persistio tras reintento: {leak}", {"correlation_id": correlation_id})
                 output = json.dumps(
                     {"messages": [{"text": TOOL_LEAK_FALLBACK_TEXT, "imageUrl": None}]},
+                    ensure_ascii=False,
+                )
+
+        # --- ANTI-CONSEJO DE CALCE (2026-11) ---
+        # El bot no sabe como le va a calzar una zapatilla: depende del pie. Si
+        # opina igual ("la horma es chica, pedi un numero mas que el de calle"),
+        # la clienta compra el talle equivocado y termina en un cambio o en un
+        # viaje al local al vacio; para puntas ademas contradice el fitting.
+        # La prohibicion esta en el prompt pero NO alcanza: ante un pedido
+        # directo el modelo le hace caso a la clienta 8 de 8 veces. Con el aviso
+        # explicito lo corrige 8 de 8, asi que se reintenta igual que la fuga.
+        calce = detect_fit_advice(_parse_output_para_guardia(output))
+        if calce:
+            logger.warning("consejo_de_calce", frase=calce[:120], conv_id=str(conv_id), attempt=1)
+            await log_db("warn", "consejo_de_calce", calce[:200], {"correlation_id": correlation_id})
+            retry_history = chat_history + [
+                AIMessage(content=str(output)[:800]),
+                HumanMessage(content=FIT_RETRY_HINT),
+            ]
+            result = await executor.ainvoke({"input": turno_cliente, "chat_history": retry_history})
+            output = result["output"]
+            calce = detect_fit_advice(_parse_output_para_guardia(output))
+            if calce:
+                logger.error("consejo_de_calce_tras_reintento", frase=calce[:120], conv_id=str(conv_id))
+                await log_db("error", "consejo_de_calce", f"persistio tras reintento: {calce[:150]}", {"correlation_id": correlation_id})
+                output = json.dumps(
+                    {"messages": [{"text": FIT_FALLBACK_TEXT, "imageUrl": None}]},
                     ensure_ascii=False,
                 )
 

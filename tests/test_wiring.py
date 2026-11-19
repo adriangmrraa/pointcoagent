@@ -163,3 +163,51 @@ def test_el_rescate_solo_corre_con_la_busqueda_vacia():
                              cuerpo, re.S):
         assert "buscar_por_categoria_equivalente" in bloque
     assert cuerpo.count("if isinstance(result, list) and not result:") == 2
+
+
+# --- guardia de consejos de calce (2026-11) ---------------------------------
+# El prompt prohibe opinar sobre calce, pero medido con el modelo real no
+# alcanza: ante un pedido directo ("calzo 38 de calle, que talle pido?") le hace
+# caso a la clienta 8 de 8 veces. Con el aviso del guardia lo corrige 8 de 8.
+# Estos tests existen para que el guardia no se desconecte sin que nos demos
+# cuenta: una llamada que no esta cambia el comportamiento sin romper ningun
+# test de unidad.
+
+def test_el_guardia_de_calce_corre_sobre_la_respuesta():
+    chat = _funcion("chat_endpoint")
+    assert _lineas_llamando(chat, "detect_fit_advice"), \
+        "nadie chequea el consejo de calce en /chat"
+
+
+def test_el_guardia_de_calce_reintenta_y_tiene_red():
+    chat = _funcion("chat_endpoint")
+    guardias = _lineas_llamando(chat, "detect_fit_advice")
+    assert len(guardias) >= 2, \
+        "el guardia de calce tiene que chequear de nuevo DESPUES del reintento"
+    nombres = {n.id for n in ast.walk(chat) if isinstance(n, ast.Name)}
+    assert "FIT_RETRY_HINT" in nombres, "no se le avisa al modelo que se equivoco"
+    assert "FIT_FALLBACK_TEXT" in nombres, "no hay red si insiste tras el reintento"
+
+
+def test_el_guardia_de_calce_corre_despues_de_tener_la_respuesta():
+    chat = _funcion("chat_endpoint")
+    invocaciones = _lineas_metodo(chat, "ainvoke")
+    guardias = _lineas_llamando(chat, "detect_fit_advice")
+    assert invocaciones and guardias
+    assert min(guardias) > min(invocaciones), \
+        "el guardia tiene que mirar la respuesta YA generada"
+
+
+def test_el_guardia_no_lee_el_json_crudo():
+    # Si se le pasa el string crudo, el guardia lee tambien las descripciones
+    # del catalogo y una ficha que diga "horma angosta" lo dispara sin que el
+    # bot haya opinado nada.
+    chat = _funcion("chat_endpoint")
+    for n in ast.walk(chat):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "detect_fit_advice"):
+            assert n.args, "detect_fit_advice sin argumentos"
+            arg = n.args[0]
+            assert isinstance(arg, ast.Call) and getattr(arg.func, "id", "") == \
+                "_parse_output_para_guardia", \
+                "hay que normalizar el output antes de pasarlo al guardia"

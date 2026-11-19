@@ -182,6 +182,13 @@ def available_variant_values(variants) -> list:
 # Este texto se copia al mensaje que lee la clienta, asi que tiene que ser
 # legible en WhatsApp y no solo correcto.
 
+# Lo que se muestra cuando un producto no tiene opciones de talle ni color.
+# Tiene que ser un valor EXPLICITO: con el campo vacio el modelo mete la
+# descripcion dentro de la etiqueta, y sin el campo inventa variantes sacadas
+# de la descripcion. Dice "presentacion" y no "talle unico" porque 18 de estos
+# productos son pegamento, cintas y cueritos, que no tienen talle.
+SIN_VARIANTES = "Única presentación"
+
 _MAX_COMBINACIONES = 12  # arriba de esto no se puede leer: las puntas llegan a 42
 _MAX_CARACTERES = 180    # una linea de "Variantes:" mas larga no la lee nadie
 

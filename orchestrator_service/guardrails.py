@@ -176,3 +176,85 @@ def detect_internal_leak(output):
         return f"patrón de invocación de tool en el texto: {match.group(0)[:60]}"
 
     return None
+
+
+# --- CONSEJOS DE CALCE INVENTADOS (2026-11) ---------------------------------
+# El bot no sabe como le va a calzar una zapatilla a una clienta: depende del
+# pie. Cuando opina igual -"las hormas son chicas, pedi un numero mas que el de
+# calle"- la clienta compra el talle equivocado y termina en un cambio o en un
+# viaje al local al vacio. Para puntas ademas contradice todo el protocolo de
+# fitting, que existe justamente porque hay que tomarle el pie.
+#
+# La prohibicion esta en el prompt, pero medido con el modelo real no alcanza:
+# ante un pedido directo ("calzo 38 de calle, que talle de puntas pido?") el
+# modelo le hace caso a la clienta 3 de 3 veces. Por eso tambien se chequea
+# aca, en codigo, donde no se lo puede convencer de lo contrario.
+#
+# IMPORTANTE: esto detecta AFIRMACIONES sobre el calce. Preguntarle el talle a
+# la clienta, o decirle que talles hay, es correcto y no tiene que disparar.
+_CALCE_RE = re.compile(
+    r"(?i)("
+    r"horma[s]?\s+(es|son|suele|suelen|viene[n]?|queda|quedan)\s*\w*\s*(chic|grand|angost|anch|peque)"
+    r"|(ped[ií]|eleg[ií]|llev[aá]|tom[aá]|compr[aá]|conviene|recomiend\w*|sugier\w*|recomendable)"
+    r"[^.?!]{0,45}?(un|medio)\s+(n[uú]mero|talle)\s+(m[aá]s|menos)"
+    r"|un\s+(n[uú]mero|talle)\s+(m[aá]s|menos)\s+(del?|que|de)\s+(tu|el|su)?\s*(calle|calzado|talle|n[uú]mero)"
+    # "equivale a 5 1/2" es una conversion de talles igual que "equivale al
+    # talle 5": el numero puede venir sin la palabra. Caso real medido: "En
+    # talle 38 (equivale a 5 1/2 o 6 segun numeracion)".
+    r"|equivale[n]?\s+a[l]?\s+(un\s+|el\s+)?(talle|n[uú]mero|\d)"
+    r"|(ser[ií]a|seria[n]?|son)\s+(un|el|los)?\s*(talle|n[uú]mero)s?\s*\d"
+    r"|te\s+(va|van)\s+a\s+(quedar|calzar)"
+    r"|te\s+(quedar[ií]a|calzar[ií]a)"
+    r"|suele[n]?\s+calzar"
+    r"|calza[n]?\s+(m[aá]s\s+)?(chico|grande|justo|holgado)"
+    r")"
+)
+
+FIT_RETRY_HINT = (
+    "SISTEMA: tu último output opina sobre el CALCE o la HORMA, o convierte un "
+    "talle de calle en un talle de danza. Eso está prohibido: no sabés cómo le "
+    "va a quedar, depende del pie de cada una, y si se equivoca termina en un "
+    "cambio o en un viaje al local al vacío. "
+    "Reescribí el mensaje: decí SOLO qué talles existen según el campo "
+    "`variants` de la tool, sin ninguna equivalencia ni recomendación de "
+    "número, y ofrecele que una asesora le tome el pie (fitting) si necesita "
+    "que la orienten. El resto del mensaje (productos, precios, links) dejalo igual."
+)
+
+FIT_FALLBACK_TEXT = (
+    "Mirá, el talle de danza no sale del número de calle: depende de tu pie, y "
+    "no quiero mandarte a comprar algo que no te calce. "
+    "Queres que una asesora te tome el pie y te asesore con el talle?"
+)
+
+
+def detect_fit_advice(output):
+    """Devuelve la frase de calce encontrada, o None si el mensaje está limpio.
+
+    Se mira SOLO el texto que lee la clienta, no las descripciones que vienen
+    del catálogo: si la ficha de un producto dice "horma angosta" eso lo
+    escribió la tienda, no el bot.
+    """
+    if output is None:
+        return None
+    textos = []
+    if isinstance(output, dict):
+        msgs = output.get("messages")
+        if isinstance(msgs, list):
+            for m in msgs:
+                if isinstance(m, dict) and isinstance(m.get("text"), str):
+                    textos.append(m["text"])
+    if not textos:
+        if isinstance(output, (dict, list)):
+            try:
+                textos = [json.dumps(output, ensure_ascii=False, default=str)]
+            except Exception:
+                textos = [str(output)]
+        else:
+            textos = [str(output)]
+    for t in textos:
+        m = _CALCE_RE.search(t)
+        if m:
+            inicio = max(0, m.start() - 30)
+            return t[inicio:m.end() + 30].strip()
+    return None

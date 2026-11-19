@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "orchestrator_service"))
 
 from catalog import (variant_has_stock, is_product_available, available_variant_values,
-                     pick_category_id, variant_availability_text)
+                     pick_category_id, variant_availability_text, SIN_VARIANTES)
 
 
 def v(stock, values=None):
@@ -560,3 +560,33 @@ def test_stock_infinito_cuenta_como_disponible():
     # stock None = sin control de stock en Tienda Nube: se puede ofrecer.
     p = _prod(["Talle", "Color"], [(None, ["P", "Negro"]), (0, ["M", "Negro"])])
     assert variant_availability_text(p) == "Talle P: Negro"
+
+
+# --- productos sin opciones de talle ni color -------------------------------
+# 18 de los 66 visibles: punteras, gel para dedos, endurecedor, cintas,
+# cueritos. Medido con el modelo real: con el campo vacío mete la descripción
+# dentro de "Variantes:", y sin el campo INVENTA variantes leyendo la
+# descripción ("Variantes: Gel y tela"). Por eso hay un valor explícito.
+
+def test_producto_sin_opciones_no_devuelve_texto_vacio():
+    p = {"variants": [{"stock": 3, "values": []}]}
+    assert variant_availability_text(p) == ""
+    # el valor explícito lo pone simplify_product, no esta función
+    assert SIN_VARIANTES and not SIN_VARIANTES.isspace()
+
+
+def test_simplify_product_siempre_manda_el_campo_variants():
+    # Es el contrato con el modelo: el campo va SIEMPRE y nunca vacío.
+    import ast
+    import io as _io
+    from pathlib import Path
+    src = _io.open(Path(__file__).resolve().parent.parent / "orchestrator_service" /
+                   "main.py", encoding="utf-8").read()
+    arbol = ast.parse(src)
+    fn = next(n for n in ast.walk(arbol)
+              if isinstance(n, ast.FunctionDef) and n.name == "simplify_product")
+    cuerpo = ast.dump(fn)
+    assert "SIN_VARIANTES" in cuerpo, "simplify_product ya no usa el valor por defecto"
+    # y que no haya quedado una asignación condicional que pueda omitir la clave
+    assert '"variants"' not in src.split("def simplify_product")[1].split("return salida")[0] \
+        or "or SIN_VARIANTES" in src.split("def simplify_product")[1].split("return salida")[0]
